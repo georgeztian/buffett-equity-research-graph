@@ -1,0 +1,26 @@
+# Secrets
+.env
+.env.*
+*.key
+*.pem
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# VS Code local settings
+.vscode/
+
+# Checkpoint database (runtime state)
+.state/
+
+# Analysis outputs (keep the folders via .gitkeep, ignore everything else)
+research/*
+!research/.gitkeep
+reports/*
+!reports/.gitkeep

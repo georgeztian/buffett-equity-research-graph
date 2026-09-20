@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(.venv/Scripts/python -m graph *)",
+      "Bash(.venv/bin/python -m graph *)",
+      "Bash(.venv/Scripts/python -m pip install --no-cache-dir -r requirements.txt)",
+      "Bash(.venv/bin/python -m pip install --no-cache-dir -r requirements.txt)"
+    ]
+  }
+}

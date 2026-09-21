@@ -45,6 +45,7 @@ Collect current and historical data:
 - Long-term debt
 - Total debt (total debt = short-term debt + long-term debt)
 - Cost of goods sold (COGS)
+- Net Property, Plant, and Equipment (Net PP&E)
 
 
 ## DCF Valuation
@@ -53,12 +54,13 @@ Collect current and historical data:
 
 **Mainly use DCF Model to Estimate Intrinsic Value**: 
 - Predict long-term sustainable "owner earnings" (and use them as future cash flows). Use the formula: Owner earnings = reported earnings + depreciation/depletion/amortization - CapEx - change/increase in working capital.
-- Adjust owner earnings to remove the effects of significant, non-recurring events like litigation settlements and IPO windfalls.
+- Normalize owner earnings to remove the effects of significant, non-recurring events like litigation settlements and IPO windfalls.
 - When forecasting future owner earnings, use total capital expenditures (not maintenance CapEx) for CapEx and focus on long-term average CapEx (do not use unusually large or small CapEx).
+- When forecasting future owner earnings, use normalized working capital swings for highly seasonal businesses
 - Make conservative assumptions based on the company's historical performance (owner earnings growth rate, terminal growth rate, etc.). When uncertain about future cash flows, use conservative estimates (do not be too optimistic).
 - To estimate terminal values, use two different methods: 1) DCF with conservative/low terminal growth rate (Gordon Growth) and 2) long-run (10-15 years) average P/E ratio (if P/E ratio has been trending lower over the past 10 years, use a lower P/E ratio than the 10-year average).
 - Use long-term Treasury bond yield (e.g. roughly 5%) with a small premium (e.g. 2%) as the discount rate (equals roughly 7%) consistently. Do not set a discount rate outside the range 6%-9% unless the user explicitly approves.
-- Conduct sensitivity analysis (Base Case, Optimistic Case, Best Case, Pessimistic Case, Worst Case).
+- Conduct sensitivity analysis (Base Case, Optimistic Case, Best Case, Pessimistic Case, Worst Case). For the Base Case, use the more conservative estimate of terminal value between Gordon Growth and long-run average P/E ratio.
 
 ### Presentation of DCF Valuation
 

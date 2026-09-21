@@ -64,10 +64,10 @@ Buffett looks for managers who are honest, competent, capable of capital allocat
 ## Capital Allocation Skill Assessment
 
 1. **Returns on Equity**: Calculate ROE as operating income after taxes divided by book value of equity (do not use net income). Compute operating income after taxes exactly as defined in "Financial data collection" in `references/valuation.md`. Calculate historical ROE under the current management. 
-2. **Incremental Return Analysis**: What return does new capital earn?
-3. **Share Repurchase Discipline**: Good management will only buy shares below intrinsic value.
+2. **Incremental Return Analysis**: What return does new capital earn? Good management will reinvest in the core business only if return on incremental capital is highly attractive.
+3. **Share Repurchase Discipline**: Good management will only buy shares below intrinsic value. Buybacks at obviously expensive valuations are a red flag.
 4. **Dividend Policy**: When to retain vs. distribute cash
-5. **Acquisition Track Record**: Have acquisitions created or destroyed value?
+5. **Acquisition Track Record**: Have acquisitions created or destroyed value? Good if past acquisitions improved per-share value.
 6. **Maintenance of Competitive Position**: Has capital been deployed to widen moats?
 
 

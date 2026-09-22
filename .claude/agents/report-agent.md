@@ -65,9 +65,10 @@ Research status: <one line — clean pass, or N HIGH / M MEDIUM issues unresolve
 This is independent, AI-assisted equity research, not personalized investment advice, and not a recommendation to buy or sell any security. Conduct independent research and consult a licensed financial advisor before investing.
 
 # Executive Summary
-(A score table should be included here, with the financial quality score and the scores provided by the moat-agent, management-agent, valuation-agent, and mos-agent. The table should also include justifications of each score. After the score table, provide a concise summary of the investment thesis.)
+(Include a score table with the financial quality score and the scores provided by the moat-agent, management-agent, valuation-agent, and mos-agent. The table should also include justifications of each score. After the score table, provide a concise summary of the investment thesis.)
 
 # Company Overview
+(Include basic corporate fact sheet, including company name, ticker, exchange, sector, industry, headquarters location, founding date, CEO and other key executives, number of employees, and a brief description of the company's business and operations. Include a brief history of the company and its major milestones.)
 
 # Business Model
 (Provide detailed description of the company's business model, including its products/services, revenue streams, cost drivers, value proposition, distribution channels, competitive positioning and advantages, and the key factors that determine its profitability and long-term growth.)

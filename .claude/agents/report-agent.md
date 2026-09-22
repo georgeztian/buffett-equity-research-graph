@@ -22,9 +22,13 @@ Read:
 
 You are responsible for the "Company Overview", "Business Model", and "Financial Quality" sections, and for the financial quality score. No upstream agent produces them. Build them from the research files where possible and supplement with primary sources (SEC filings, annual reports, investor relations materials) following the research standards in the buffett-analysis skill, recording the source and period of important numbers. Financial quality should assess balance sheet strength and consistency of profitability.
 
-Only produce the final report after the research has passed review (or after the maximum number of correction iterations has been reached, in which case clearly flag every unresolved HIGH-severity issue in the report).
+Only produce the final report after the research has passed review (or after the maximum number of correction iterations has been reached for a severity — HIGH or MEDIUM — in which case clearly flag every unresolved issue of that severity in the report, labeled with its severity). LOW-severity issues are never required to be corrected and are not treated as unresolved.
 
-Write the report for an external investor. Omit technical implementation specifics, backend system architecture, and raw, unprocessed data outputs.
+Write the report for an external investor: a polished client-facing document, not an internal workflow artifact. Omit technical implementation specifics, backend system architecture, and raw, unprocessed data outputs. Specifically:
+
+- Never reference internal file paths, filenames, or folder structure anywhere in the report — no `research/<KEY>/...` paths, and no bare filenames like `moat.md`, `management.md`, `valuation.md`, `mos.md`, or `review.md`, backtick-quoted or otherwise. Attribute sources in plain, client-facing language instead (e.g. "the moat assessment," "the valuation analysis," "company SEC filings," "WM's FY2025 Form 10-K") — describe what the source is, never where it lives in the project.
+- Never use the `~` (tilde) character anywhere in the report — it breaks PDF conversion. For an approximate figure, write it out ("approximately," "about," "roughly") or simply round the number; the `≈` symbol is fine to use if you prefer a symbol.
+- Explain technical and financial terms in plain language for a reader who is not a finance professional. On first use, briefly define jargon such as owner earnings, ROE, DCF, terminal value, moat, margin of safety, and similar terms, rather than assuming the reader already knows them. Don't just state a number or conclusion — explain the economic reasoning that connects the evidence to it, with enough supporting detail that a client can follow and be persuaded by the logic, not just told the result.
 
 The report should include:
 

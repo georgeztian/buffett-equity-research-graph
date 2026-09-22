@@ -7,7 +7,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
-MAX_CORRECTIONS = 5          # Stage 4 iteration cap
+MAX_CORRECTIONS = 5          # Stage 4 iteration cap, HIGH-severity findings
+MAX_MEDIUM_CORRECTIONS = 2   # Stage 4b iteration cap, MEDIUM-severity findings (runs after HIGH is clear)
 MAX_VALIDATION_RETRIES = 2   # retries per node when output fails validation
 AGENT_TIMEOUT_SECONDS = 45 * 60
 # The SDK's default 1 MB per-message limit is exceeded when an agent fetches a large filing

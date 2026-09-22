@@ -83,6 +83,6 @@ def load_report(path: Path) -> ReportSidecar:
     return ReportSidecar.model_validate(load_json(path))
 
 
-def is_correctable(f: Finding) -> bool:
-    """A HIGH finding the correction loop can act on (owned by an upstream analyst)."""
-    return f.severity == "HIGH" and f.owner in ANALYSTS
+def is_correctable(f: Finding, severity: Severity = "HIGH") -> bool:
+    """A finding of the given severity the correction loop can act on (owned by an upstream analyst)."""
+    return f.severity == severity and f.owner in ANALYSTS

@@ -10,8 +10,8 @@ from pathlib import Path
 
 from . import contracts, manifest, prompts, routing, validators
 from .agent_runner import AgentRunner, AgentTask
-from .config import (AGENT_FILE, ALL_AGENTS, ANALYSTS, DEPENDS, MAX_CORRECTIONS, MAX_VALIDATION_RETRIES,
-                     RESEARCH_AGENTS, Paths)
+from .config import (AGENT_FILE, ALL_AGENTS, ANALYSTS, DEPENDS, MAX_CORRECTIONS, MAX_MEDIUM_CORRECTIONS,
+                     MAX_VALIDATION_RETRIES, RESEARCH_AGENTS, Paths)
 from .notify import notify
 from .summary import write_summary
 
@@ -59,7 +59,10 @@ class Workflow:
     # ------------------------------------------------------------------ core executor
     async def _execute(self, agent: str, state: dict, **ctx) -> dict:
         paths = self.paths(state)
-        iteration = state.get("iteration", 0)
+        iteration = state.get("iteration", 0)               # total correction rounds (HIGH + MEDIUM); unique round id
+        high_iteration = state.get("high_iteration", 0)     # HIGH-phase rounds so far; cap: MAX_CORRECTIONS
+        medium_iteration = state.get("medium_iteration", 0) # MEDIUM-phase rounds so far; cap: MAX_MEDIUM_CORRECTIONS
+        phase = ctx.get("phase")                            # "high" | "medium" | None, set by the correction nodes
         prior_runs = state.get("status", {}).get(agent, {}).get("runs", 0)
 
         missing = [d for d in DEPENDS[agent] if not paths.output(d).exists()]
@@ -71,8 +74,10 @@ class Workflow:
             return self._result(agent, paths, prior_runs, done["attempts"], None, iteration,
                                 _event(f"{agent}: already complete for round {iteration}; not re-run"))
 
-        sys_prompt = prompts.system_prompt(self.root, paths, agent, state["company"], iteration)
+        sys_prompt = prompts.system_prompt(self.root, paths, agent, state["company"], iteration,
+                                           high_iteration=high_iteration, medium_iteration=medium_iteration)
         base_prompt = prompts.user_prompt(paths, agent, state["company"], iteration=iteration,
+                                          high_iteration=high_iteration, medium_iteration=medium_iteration,
                                           scores=state.get("scores"), **ctx)
         in_hashes = manifest.input_hashes(paths, agent)
         allowed = (paths.output(agent), paths.sidecar(agent))
@@ -81,7 +86,8 @@ class Workflow:
         for attempt in range(1, MAX_VALIDATION_RETRIES + 2):
             attempts = attempt
             started = time.time()
-            label = f" (correction round {iteration})" if iteration and agent in ANALYSTS else \
+            phase_tag = f" [{phase.upper()}]" if phase else ""
+            label = f" (correction round {iteration}{phase_tag})" if iteration and agent in ANALYSTS else \
                     f" (re-review after round {iteration})" if iteration and agent == "review" else ""
             _log(f"{agent}: started{label}" + (f", attempt {attempt}" if attempt > 1 else ""))
             res = await self.runner.run(AgentTask(agent, sys_prompt, prompt, self.root, allowed))
@@ -139,7 +145,8 @@ class Workflow:
                 shutil.move(str(p), dest)
         paths.meta_dir.mkdir(parents=True, exist_ok=True)
         paths.reports_dir.mkdir(parents=True, exist_ok=True)
-        return {"iteration": 0, "findings": [], "unresolved_high": [],
+        return {"iteration": 0, "high_iteration": 0, "medium_iteration": 0, "findings": [],
+                "unresolved_high": [], "unresolved_medium": [],
                 "history": [_event(f"input validated for {state['company']} -> key {state['key']}"
                                    + (f"; archived {len(old)} earlier files" if old else ""))]}
 
@@ -155,38 +162,65 @@ class Workflow:
             raise NodeFailure(f"review blocked, stale inputs: {stale}", "review")
         upd = await self._execute("review", state)
         rev = contracts.load_review(paths.sidecar("review"))
-        n_correctable = sum(contracts.is_correctable(f) for f in rev.findings)
+        n_high_correctable = sum(contracts.is_correctable(f, "HIGH") for f in rev.findings)
+        n_medium_correctable = sum(contracts.is_correctable(f, "MEDIUM") for f in rev.findings)
         upd["findings"] = [f.model_dump() for f in rev.findings]
-        upd["history"].append(_event(f"review: {rev.counts.high} HIGH ({n_correctable} correctable), "
-                                     f"{rev.counts.medium} MEDIUM, {rev.counts.low} LOW"))
+        upd["history"].append(_event(f"review: {rev.counts.high} HIGH ({n_high_correctable} correctable), "
+                                     f"{rev.counts.medium} MEDIUM ({n_medium_correctable} correctable), "
+                                     f"{rev.counts.low} LOW"))
         return upd
 
-    async def correct(self, state: dict) -> dict:
+    async def _run_correction_round(self, state: dict, *, severity: str, plan_fn, round_field: str,
+                                    max_rounds: int, phase: str) -> dict:
+        """One correction round acting only on findings of `severity`. Shared by `correct` (HIGH, cap
+        MAX_CORRECTIONS) and `correct_medium` (MEDIUM, cap MAX_MEDIUM_CORRECTIONS). `iteration` is the
+        single monotonic round id shared by both phases (kept unique across the whole correction stage,
+        for manifest/resume bookkeeping); `round_field` is the phase-local counter (`high_iteration` or
+        `medium_iteration`) that each phase's own cap is checked against in routing.py, so activity in one
+        phase never changes the other phase's remaining budget.
+        """
         paths = self.paths(state)
-        rnd = state.get("iteration", 0) + 1
-        plan = routing.plan_corrections(state["findings"])
-        rstate = {**state, "iteration": rnd}
+        total_rnd = state.get("iteration", 0) + 1
+        phase_rnd = state.get(round_field, 0) + 1
+        plan = plan_fn(state["findings"])
+        rstate = {**state, "iteration": total_rnd, round_field: phase_rnd}
         first = [a for a in RESEARCH_AGENTS if a in plan]
-        updates = [{"history": [_event(f"correction round {rnd}: owners={sorted(plan)}")]}]
+        updates = [{"history": [_event(f"{severity} correction round {phase_rnd} of {max_rounds} "
+                                       f"(overall round {total_rnd}): owners={sorted(plan)}")]}]
         if first:
             # Let every sibling finish (their results persist in the manifest) before surfacing a failure.
             results = await asyncio.gather(*(
-                self._execute(a, rstate, findings=plan[a]) for a in first), return_exceptions=True)
+                self._execute(a, rstate, findings=plan[a], phase=phase) for a in first), return_exceptions=True)
             failures = [r for r in results if isinstance(r, BaseException)]
             if failures:
                 raise next((f for f in failures if isinstance(f, UsageLimitReached)), failures[0])
             updates += results
         # Downstream refresh comes from content hashes, not from a hand-written rule. A mos that already
         # finished this round (before an interruption) must still be merged into the state.
-        if "mos" in plan or manifest.stale_agents(paths, ("mos",)) or manifest.completed_in_round(paths, "mos", rnd):
+        if "mos" in plan or manifest.stale_agents(paths, ("mos",)) or manifest.completed_in_round(paths, "mos", total_rnd):
             merged = _merge(*updates)
             mstate = {**rstate, "status": {**state.get("status", {}), **merged["status"]},
                       "scores": {**state.get("scores", {}), **merged["scores"]}}
             updates.append(await self._execute("mos", mstate, findings=plan.get("mos", ()),
-                                               upstream_changed=bool(first)))
+                                               upstream_changed=bool(first), phase=phase))
         out = _merge(*updates)
-        out["iteration"] = rnd
+        out["iteration"] = total_rnd
+        out[round_field] = phase_rnd
         return out
+
+    async def correct(self, state: dict) -> dict:
+        """HIGH-severity correction round. Cap: MAX_CORRECTIONS (5). Unchanged behavior from before the
+        MEDIUM loop was added: same plan, same fan-out/mos-refresh logic, same cap."""
+        return await self._run_correction_round(state, severity="HIGH", plan_fn=routing.plan_corrections,
+                                                 round_field="high_iteration", max_rounds=MAX_CORRECTIONS,
+                                                 phase="high")
+
+    async def correct_medium(self, state: dict) -> dict:
+        """MEDIUM-severity correction round. Cap: MAX_MEDIUM_CORRECTIONS (2). Only reached once no
+        correctable HIGH finding remains (see routing.route_after_review)."""
+        return await self._run_correction_round(state, severity="MEDIUM", plan_fn=routing.plan_corrections_medium,
+                                                 round_field="medium_iteration", max_rounds=MAX_MEDIUM_CORRECTIONS,
+                                                 phase="medium")
 
     async def flag_unresolved(self, state: dict) -> dict:
         paths = self.paths(state)
@@ -196,25 +230,46 @@ class Workflow:
                 "history": [_event(f"correction limit ({MAX_CORRECTIONS}) reached; "
                                    f"{len(unresolved)} HIGH issue(s) flagged unresolved")]}
 
+    async def flag_unresolved_medium(self, state: dict) -> dict:
+        paths = self.paths(state)
+        unresolved = [f.model_dump() for f in routing.correctable_medium(state["findings"])]
+        (paths.meta_dir / "unresolved_medium.json").write_text(json.dumps(unresolved, indent=2), encoding="utf-8")
+        return {"unresolved_medium": unresolved,
+                "history": [_event(f"MEDIUM correction limit ({MAX_MEDIUM_CORRECTIONS}) reached; "
+                                   f"{len(unresolved)} MEDIUM issue(s) flagged unresolved")]}
+
     async def report(self, state: dict) -> dict:
         paths = self.paths(state)
         stale = validators.check_fresh_inputs(paths, "report")
         if stale:
             raise NodeFailure(f"report blocked, stale inputs: {stale}", "report")
-        unresolved = [contracts.Finding.model_validate(f) for f in state.get("unresolved_high", [])]
-        notes = routing.report_owned_high(state.get("findings", []))
-        return await self._execute("report", state, unresolved=unresolved, report_notes=notes)
+        # Recomputed from the latest findings, not from state["unresolved_medium"]: if the HIGH cap was
+        # reached first, route_after_review goes straight to report without ever running correct_medium
+        # or flag_unresolved_medium, so a correctable MEDIUM finding can still be sitting unattended in
+        # `findings` here. (No equivalent gap exists for HIGH: report is only ever reached with a
+        # correctable HIGH finding still present after flag_unresolved has already populated
+        # unresolved_high, since route_after_review never falls through to report or correct_medium while
+        # one remains.)
+        unresolved_medium = [f.model_dump() for f in routing.correctable_medium(state.get("findings", []))]
+        unresolved = [contracts.Finding.model_validate(f) for f in state.get("unresolved_high", []) + unresolved_medium]
+        notes = routing.report_owned_high(state.get("findings", [])) + routing.report_owned_medium(state.get("findings", []))
+        upd = await self._execute("report", state, unresolved=unresolved, report_notes=notes)
+        upd["unresolved_medium"] = unresolved_medium  # authoritative as of report time, for run_summary.json
+        return upd
 
     async def finalize(self, state: dict) -> dict:
         paths = self.paths(state)
         summary = write_summary(paths, state)
         print(f"\nBuffett analysis for {state['company']} is {summary['workflow_status']}.")
-        print(f"  Correction iterations: {summary['correction_iterations']}")
+        print(f"  Correction iterations: {summary['high_correction_iterations']} HIGH, "
+             f"{summary['medium_correction_iterations']} MEDIUM")
         print(f"  Unresolved HIGH issues: {len(summary['unresolved_high_issues'])}")
+        print(f"  Unresolved MEDIUM issues: {len(summary['unresolved_medium_issues'])}")
         print(f"  Report:  {summary['final_report']}")
         print(f"  Summary: {paths.rel(paths.reports_dir / 'run_summary.md')}")
         notify(f"Buffett: {state['company']} - analysis {summary['workflow_status']}",
-               f"{summary['correction_iterations']} correction round(s), "
-               f"{len(summary['unresolved_high_issues'])} unresolved HIGH issue(s). "
+               f"{summary['high_correction_iterations']} HIGH + {summary['medium_correction_iterations']} MEDIUM "
+               f"correction round(s), {len(summary['unresolved_high_issues'])} unresolved HIGH, "
+               f"{len(summary['unresolved_medium_issues'])} unresolved MEDIUM issue(s). "
                f"Report: {summary['final_report']}")
         return {"history": ["workflow complete"]}

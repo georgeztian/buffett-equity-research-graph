@@ -80,7 +80,7 @@ def _check_report(text: str, rep: contracts.ReportSidecar, scores: dict[str, int
         if rep.scores_reported.get(agent) != s:
             errs.append(f"scores_reported[{agent!r}]={rep.scores_reported.get(agent)} != upstream score {s}")
     if unresolved and not re.search(r"unresolved", text, re.IGNORECASE):
-        errs.append("report must flag the unresolved HIGH-severity issues")
+        errs.append("report must flag the unresolved HIGH- and/or MEDIUM-severity issues")
     return errs
 
 

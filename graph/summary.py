@@ -20,9 +20,13 @@ def build_summary(paths: Paths, state: dict, error: str | None = None, paused: b
         "workflow_status": "COMPLETE" if complete else "PAUSED" if paused else "FAILED",
         "error": error,
         "agents": {a: status.get(a, {"state": "not_run"}) for a in ALL_AGENTS},
-        "correction_iterations": state.get("iteration", 0),
+        "correction_iterations": state.get("high_iteration", 0),         # kept: HIGH rounds, as before this field existed
+        "high_correction_iterations": state.get("high_iteration", 0),
+        "medium_correction_iterations": state.get("medium_iteration", 0),
+        "total_correction_iterations": state.get("iteration", 0),
         "scores": state.get("scores", {}),
         "unresolved_high_issues": state.get("unresolved_high", []),
+        "unresolved_medium_issues": state.get("unresolved_medium", []),
         "final_report": paths.rel(report) if report.exists() else None,
         "history": state.get("history", []),
     }
@@ -31,7 +35,8 @@ def build_summary(paths: Paths, state: dict, error: str | None = None, paused: b
 def render_markdown(s: dict) -> str:
     lines = [f"# Workflow Execution Summary: {s['company']}", "",
              f"- Status: **{s['workflow_status']}**", f"- Run id: `{s['run_id']}`",
-             f"- Correction iterations performed: {s['correction_iterations']}",
+             f"- HIGH correction rounds performed: {s['high_correction_iterations']}",
+             f"- MEDIUM correction rounds performed: {s['medium_correction_iterations']}",
              f"- Final report: {s['final_report'] or 'not produced'}"]
     if s["error"]:
         lines.append(f"- Error: {s['error']}")
@@ -44,6 +49,12 @@ def render_markdown(s: dict) -> str:
     lines += ["", "## Unresolved HIGH-severity issues", ""]
     if s["unresolved_high_issues"]:
         for f in s["unresolved_high_issues"]:
+            lines.append(f"- **[{f['id']}]** ({f['owner']}) {f['problem']} — required: {f['required_correction']}")
+    else:
+        lines.append("None.")
+    lines += ["", "## Unresolved MEDIUM-severity issues", ""]
+    if s["unresolved_medium_issues"]:
+        for f in s["unresolved_medium_issues"]:
             lines.append(f"- **[{f['id']}]** ({f['owner']}) {f['problem']} — required: {f['required_correction']}")
     else:
         lines.append("None.")

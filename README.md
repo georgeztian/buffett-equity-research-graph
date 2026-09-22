@@ -13,13 +13,13 @@ Specialized agents run in five stages, and no agent starts until the analyses it
 1. **Research (in parallel):** the moat, management, and valuation agents each analyze one aspect of the company.
 2. **Margin of safety:** the MOS agent compares the current price with the estimated intrinsic value, using the Stage 1 results.
 3. **Independent review:** a reviewer agent audits all research and rates every problem HIGH, MEDIUM, or LOW.
-4. **Correction loop:** if there are HIGH-severity issues, only the affected agents are re-run (plus any downstream agents), then the reviewer checks again. This repeats up to 5 times. Any issue still unresolved is flagged in the final report.
-5. **Report:** the report agent writes the final investment report once the review has passed.
+4. **Correction loop:** if there are HIGH-severity issues, only the affected agents are re-run (plus any downstream agents), then the reviewer checks again. This repeats up to 5 times. If a HIGH issue is still open after the 5th round, the workflow stops correcting and goes straight to Stage 5 with it flagged unresolved — MEDIUM issues are not attempted in that case. Only once every HIGH issue has actually been resolved does the same loop run again for MEDIUM-severity issues, up to 2 times; a MEDIUM issue still open after that is likewise flagged unresolved. LOW-severity issues are never corrected.
+5. **Report:** the report agent writes the final investment report once the review has passed, or once a correction loop has run out of rounds with issues of its severity still open (HIGH takes priority: reaching its cap goes straight to Stage 5 without any MEDIUM attempt).
 
 
 ## Deterministic graph
 
-The workflow is implemented as a LangGraph in `graph/`. **Code owns control flow; the LLM owns content.** Ordering, parallelism, completion checks, review routing, the correction loop and its 5-iteration cap, staleness detection and the final summary are all plain Python. Each agent is one bounded call through the Claude Agent SDK, and its output is accepted only after deterministic validation.
+The workflow is implemented as a LangGraph in `graph/`. **Code owns control flow; the LLM owns content.** Ordering, parallelism, completion checks, review routing, the two correction loops (HIGH: 5-iteration cap; MEDIUM: 2-iteration cap, attempted only once every HIGH issue is actually resolved — never merely because HIGH's own cap was reached), staleness detection and the final summary are all plain Python. Each agent is one bounded call through the Claude Agent SDK, and its output is accepted only after deterministic validation.
 
 
 ## Architecture

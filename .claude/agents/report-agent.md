@@ -37,6 +37,7 @@ The report should include:
 # Company Overview
 
 # Business Model
+(Provide detailed description of the company's business model, including its products/services, revenue streams, cost drivers, value proposition, distribution channels, competitive positioning and advantages, and the key factors that determine its profitability and long-term growth.)
 
 # Financial Quality
 

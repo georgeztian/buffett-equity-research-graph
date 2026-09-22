@@ -55,10 +55,10 @@ Buffett looks for managers who are honest, competent, capable of capital allocat
 
 ## Compensation Philosophy
 
+- **CEO-Shareholders Alignment**: The larger the CEO’s existing wealth at stake relative to their annual total compensation, the stronger the potential alignment with shareholders. Calculate CEO ownership value (not ownership percentage) scaled by current total compensation and analyze CEO-shareholders alignment.
 - Align incentives with shareholder value creation over the long term
 - Compensation should reflect profitability and capital efficiency
 - Stock options should be considered as an expense (dilution)
-- Excessive compensation often indicates poor governance
 - Simple compensation plans aligned with long-term value are preferable to complex schemes
 
 ## Capital Allocation Skill Assessment

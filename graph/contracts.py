@@ -32,22 +32,22 @@ class Counts(BaseModel):
     high: int = Field(ge=0)
     medium: int = Field(ge=0)
     low: int = Field(ge=0)
-    high_unresolved: int = Field(ge=0)
 
 
 class ReviewSidecar(BaseModel):
+    """Only `findings` is authoritative. Severity counts are derived from it in code (never asked of the model),
+    so they cannot disagree with the findings; a `counts` key left in an older-style sidecar is ignored."""
     findings: list[Finding]
-    counts: Counts
 
     @model_validator(mode="after")
-    def _counts_match(self) -> "ReviewSidecar":
-        n = {s: sum(f.severity == s for f in self.findings) for s in ("HIGH", "MEDIUM", "LOW")}
-        c = self.counts
-        if (n["HIGH"], n["MEDIUM"], n["LOW"]) != (c.high, c.medium, c.low):
-            raise ValueError(f"counts {c.high}/{c.medium}/{c.low} do not match findings {n}")
+    def _unique_ids(self) -> "ReviewSidecar":
         if len({f.id for f in self.findings}) != len(self.findings):
             raise ValueError("duplicate finding ids")
         return self
+
+    @property
+    def counts(self) -> Counts:
+        return Counts(**{s.lower(): sum(f.severity == s for f in self.findings) for s in ("HIGH", "MEDIUM", "LOW")})
 
 
 class ReportSidecar(BaseModel):

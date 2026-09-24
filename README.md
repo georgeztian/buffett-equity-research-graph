@@ -10,6 +10,7 @@ A multi-agent research workflow for Claude Code that analyzes a publicly traded 
 
 Specialized agents run in five stages, and no agent starts until the analyses it depends on are complete.
 
+0. **SEC data pack:** before the agents start, the graph pulls the company's annual XBRL financials from SEC EDGAR once and writes `research/<KEY>/_data/financials.md`: values exactly as filed with their filing references, plus a few reference calculations with their formulas. Every agent reads the same numbers instead of each fetching and re-deriving them. If the company is not an SEC filer with US-GAAP XBRL data, the pack says so and the agents research as before. Set `SEC_USER_AGENT` to change the User-Agent sent to SEC.
 1. **Research (in parallel):** the moat, management, and valuation agents each analyze one aspect of the company.
 2. **Margin of safety:** the MOS agent compares the current price with the estimated intrinsic value, using the Stage 1 results.
 3. **Independent review:** a reviewer agent audits all research and rates every problem HIGH, MEDIUM, or LOW.
@@ -19,7 +20,7 @@ Specialized agents run in five stages, and no agent starts until the analyses it
 
 ## Deterministic graph
 
-The workflow is implemented as a LangGraph in `graph/`. **Code owns control flow; the LLM owns content.** Ordering, parallelism, completion checks, review routing, the two correction loops (HIGH: 5-iteration cap; MEDIUM: 2-iteration cap, attempted only once every HIGH issue is actually resolved — never merely because HIGH's own cap was reached), staleness detection and the final summary are all plain Python. Each agent is one bounded call through the Claude Agent SDK, and its output is accepted only after deterministic validation.
+The workflow is implemented as a LangGraph in `graph/`. **Code owns control flow; the LLM owns content.** Ordering, parallelism, completion checks, review routing, the two correction loops (HIGH: 5-iteration cap; MEDIUM: 2-iteration cap, attempted only once every HIGH issue is actually resolved — never merely because HIGH's own cap was reached), staleness detection and the final summary are all plain Python. Each agent is one bounded call through the Claude Agent SDK, and its output is accepted only after deterministic validation. If validation rejects an output, the list of problems goes back into the same agent session, so the agent fixes only what was rejected instead of starting over; a session that fails to execute is replaced by a fresh one.
 
 
 ## Architecture
@@ -29,7 +30,7 @@ The workflow is implemented as a LangGraph in `graph/`. **Code owns control flow
   agents/      Six agents: moat, management, valuation, MOS, reviewer, report
   skills/      Buffett analysis methodology (with reference files) and the run skill
   settings.json  Pre-approved commands for running the graph
-graph/           LangGraph implementation: nodes, routing, validators, contracts, runner, CLI
+graph/           LangGraph implementation: nodes, routing, validators, contracts, runner, SEC data pack, CLI
 research/<KEY>/  Intermediate analyses and the review, per company (gitignored)
 reports/<KEY>/   Final investment report and run summary, per company (gitignored)
 .state/          Checkpoint database and detached-run logs (gitignored)

@@ -20,7 +20,7 @@ Execute the workflow via the run-buffett-analysis skill, which runs the determin
 - `.claude/settings.json` — pre-approved commands for running the graph
 - `graph/` — the LangGraph implementation of the 5-stage Buffett workflow and the single source of truth for it (routing, validation, correction loop, summary)
 - `.state/` — runtime state: the checkpoint database and detached-run logs (gitignored)
-- `research/<KEY>/` — intermediate research and analysis results per company (`<KEY>` = ticker, or a slug of the name); `_meta/` holds machine-readable sidecars
+- `research/<KEY>/` — intermediate research and analysis results per company (`<KEY>` = ticker, or a slug of the name); `_meta/` holds machine-readable sidecars; `_data/` holds the deterministic SEC XBRL data pack (Stage 0) shared by all agents
 - `reports/<KEY>/` — includes final investment reports intended for end users and the run summary; only analyses that have passed the review should be incorporated into final reports.
 
 

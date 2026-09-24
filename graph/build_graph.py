@@ -17,6 +17,7 @@ def build_graph(runner: AgentRunner, root: Path = ROOT, checkpointer=None):
     g = StateGraph(GraphState)
 
     g.add_node("validate_input", wf.validate_input)
+    g.add_node("data_pack", wf.data_pack)          # Stage 0 (deterministic SEC data, shared by all agents)
     for a in RESEARCH_AGENTS:                      # Stage 1 (parallel fan-out)
         g.add_node(a, wf.agent_node(a))
     g.add_node("mos", wf.agent_node("mos"))        # Stage 2
@@ -29,8 +30,9 @@ def build_graph(runner: AgentRunner, root: Path = ROOT, checkpointer=None):
     g.add_node("finalize", wf.finalize)
 
     g.add_edge(START, "validate_input")
+    g.add_edge("validate_input", "data_pack")
     for a in RESEARCH_AGENTS:
-        g.add_edge("validate_input", a)
+        g.add_edge("data_pack", a)
     g.add_edge(list(RESEARCH_AGENTS), "mos")       # join: waits for all three
     g.add_edge("mos", "review")
     # HIGH is checked first; MEDIUM is only ever considered once no correctable HIGH finding remains, and

@@ -14,6 +14,10 @@ AGENT_TIMEOUT_SECONDS = 45 * 60
 # The SDK's default 1 MB per-message limit is exceeded when an agent fetches a large filing
 # (e.g. a 10-K page), which kills the attempt with "JSON message exceeded maximum buffer size".
 AGENT_MAX_BUFFER_BYTES = 100 * 1024 * 1024
+# SEC EDGAR asks automated clients to identify themselves; override with the SEC_USER_AGENT env var.
+SEC_USER_AGENT = "buffett-equity-research-graph/1.0 (local research tool)"
+SEC_TIMEOUT_SECONDS = 30
+DATA_PACK_YEARS = 15         # fiscal years of XBRL history in the data pack
 
 RESEARCH_AGENTS = ("moat", "management", "valuation")   # Stage 1 (parallel)
 ANALYSTS = RESEARCH_AGENTS + ("mos",)                   # agents that can own a finding
@@ -120,6 +124,15 @@ class Paths:
     @property
     def meta_dir(self) -> Path:
         return self.research_dir / "_meta"
+
+    @property
+    def data_dir(self) -> Path:
+        """Stage 0 SEC data pack (deterministic, fetched once per run and shared by every agent)."""
+        return self.research_dir / "_data"
+
+    @property
+    def data_pack(self) -> Path:
+        return self.data_dir / "financials.md"
 
     @property
     def reports_dir(self) -> Path:

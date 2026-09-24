@@ -5,11 +5,12 @@ import asyncio
 import json
 import shutil
 import time
+from contextlib import AsyncExitStack
 from datetime import datetime
 from pathlib import Path
 
-from . import contracts, manifest, prompts, routing, validators
-from .agent_runner import AgentRunner, AgentTask
+from . import contracts, datapack, manifest, prompts, routing, validators
+from .agent_runner import AgentRunner, AgentTask, Usage
 from .config import (AGENT_FILE, ALL_AGENTS, ANALYSTS, DEPENDS, MAX_CORRECTIONS, MAX_MEDIUM_CORRECTIONS,
                      MAX_VALIDATION_RETRIES, RESEARCH_AGENTS, Paths)
 from .notify import notify
@@ -30,9 +31,10 @@ def _event(msg: str) -> str:
 class NodeFailure(RuntimeError):
     """A node could not produce a complete, valid output within its retry budget."""
 
-    def __init__(self, message: str, agent: str | None = None):
+    def __init__(self, message: str, agent: str | None = None, usage: Usage | None = None):
         super().__init__(message)
         self.agent = agent
+        self.usage = usage   # what the failed run spent, so the summary still accounts for it
 
 
 class UsageLimitReached(NodeFailure):
@@ -69,10 +71,11 @@ class Workflow:
         if missing:
             raise NodeFailure(f"{agent}: upstream outputs missing: {missing}", agent)
 
+        prior = state.get("status", {}).get(agent, {})
         done = manifest.completed_in_round(paths, agent, iteration) if iteration else None
         if done:  # finished earlier in this correction round; the node failed elsewhere, so don't redo it
             return self._result(agent, paths, prior_runs, done["attempts"], None, iteration,
-                                _event(f"{agent}: already complete for round {iteration}; not re-run"))
+                                _event(f"{agent}: already complete for round {iteration}; not re-run"), prior)
 
         sys_prompt = prompts.system_prompt(self.root, paths, agent, state["company"], iteration,
                                            high_iteration=high_iteration, medium_iteration=medium_iteration)
@@ -81,40 +84,63 @@ class Workflow:
                                           scores=state.get("scores"), **ctx)
         in_hashes = manifest.input_hashes(paths, agent)
         allowed = (paths.output(agent), paths.sidecar(agent))
+        phase_tag = f" [{phase.upper()}]" if phase else ""
+        label = f" (correction round {iteration}{phase_tag})" if iteration and agent in ANALYSTS else \
+                f" (re-review after round {iteration})" if iteration and agent == "review" else ""
 
-        prompt, errors, attempts, cost = base_prompt, [], 0, 0.0
-        for attempt in range(1, MAX_VALIDATION_RETRIES + 2):
-            attempts = attempt
-            started = time.time()
-            phase_tag = f" [{phase.upper()}]" if phase else ""
-            label = f" (correction round {iteration}{phase_tag})" if iteration and agent in ANALYSTS else \
-                    f" (re-review after round {iteration})" if iteration and agent == "review" else ""
-            _log(f"{agent}: started{label}" + (f", attempt {attempt}" if attempt > 1 else ""))
-            res = await self.runner.run(AgentTask(agent, sys_prompt, prompt, self.root, allowed))
-            cost += res.cost_usd or 0.0
-            if res.usage_limit:
-                raise UsageLimitReached(f"{agent}: {res.error}", agent)
-            errors = [f"agent execution error: {res.error}"] if not res.ok else validators.validate(
-                agent, paths, started, scores=state.get("scores"),
-                unresolved=ctx.get("unresolved") or [])
-            if not errors:
-                break
-            _log(f"{agent}: attempt {attempt} rejected: {errors[0][:160]}")
-            prompt = (base_prompt + "\n\n## YOUR PREVIOUS ATTEMPT WAS REJECTED\nFix these problems and "
-                      "re-save the required files:\n" + "\n".join(f"- {e}" for e in errors))
+        # A validation rejection is sent back into the SAME session (the agent keeps everything it has already
+        # read and only fixes what was rejected). A session that failed to execute is replaced by a fresh one
+        # that gets the full task again. `started` marks the session start: files must be written after it.
+        use = Usage()
+        errors, attempts, started = [], 0, time.time()
+        async with AsyncExitStack() as stack:
+            session = None
+            for attempt in range(1, MAX_VALIDATION_RETRIES + 2):
+                attempts = attempt
+                if session is None:
+                    prompt = base_prompt if attempt == 1 else (
+                        base_prompt + "\n\n## YOUR PREVIOUS ATTEMPT WAS REJECTED\nFix these problems and "
+                        "re-save the required files:\n" + "\n".join(f"- {e}" for e in errors))
+                    session_stack = await stack.enter_async_context(AsyncExitStack())
+                    session = await session_stack.enter_async_context(
+                        self.runner.session(AgentTask(agent, sys_prompt, prompt, self.root, allowed)))
+                    started = time.time()
+                    how = ""
+                else:
+                    prompt = prompts.fix_prompt(errors)
+                    how = " (same session)"
+                _log(f"{agent}: started{label}" + (f", attempt {attempt}{how}" if attempt > 1 else ""))
+                res = await session.send(prompt)
+                use.add(res)
+                if res.usage_limit:
+                    raise UsageLimitReached(f"{agent}: {res.error}", agent, use)
+                if res.ok:
+                    errors = validators.validate(agent, paths, started, scores=state.get("scores"),
+                                                 unresolved=ctx.get("unresolved") or [])
+                else:
+                    errors = [f"agent execution error: {res.error}"]
+                    await session_stack.aclose()   # a broken session is not reused
+                    session = None
+                if not errors:
+                    break
+                _log(f"{agent}: attempt {attempt} rejected: {errors[0][:160]}")
         if errors:
-            raise NodeFailure(f"{agent} failed after {attempts} attempts: " + "; ".join(errors), agent)
+            raise NodeFailure(f"{agent} failed after {attempts} attempts: " + "; ".join(errors), agent, use)
 
         manifest.record(paths, agent, in_hashes, iteration, attempts)
-        return self._result(agent, paths, prior_runs, attempts, round(cost, 4), iteration,
-                            _event(f"{agent}: complete (run {prior_runs + 1}, {attempts} attempt(s))"))
+        return self._result(agent, paths, prior_runs, attempts, use, iteration,
+                            _event(f"{agent}: complete (run {prior_runs + 1}, {attempts} attempt(s), "
+                                   f"{use.describe()})"), prior)
 
     @staticmethod
-    def _result(agent: str, paths: Paths, prior_runs: int, attempts: int, cost: float | None,
-                iteration: int, event: str) -> dict:
+    def _result(agent: str, paths: Paths, prior_runs: int, attempts: int, use: "Usage | None",
+                iteration: int, event: str, prior: dict) -> dict:
+        """`cost_usd`, `seconds` and `tokens` describe this run; `total_*` add up every run of the agent."""
+        this = use.record() if use else {"cost_usd": None, "seconds": 0.0, "turns": 0, "tokens": {}}
         update: dict = {
             "status": {agent: {"state": "complete", "runs": prior_runs + 1, "attempts": attempts,
-                               "cost_usd": cost, "correction_round": iteration}},
+                               "correction_round": iteration, **this,
+                               **Usage.accumulate(prior, this)}},
             "history": [event],
         }
         if agent in ANALYSTS:
@@ -133,7 +159,8 @@ class Workflow:
                 raise NodeFailure(f"missing reference file: {ref}.md")
 
         stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        old = [p for p in (*paths.research_dir.glob("*.md"), *paths.meta_dir.glob("*.json")) if p.is_file()]
+        old = [p for p in (*paths.research_dir.glob("*.md"), *paths.meta_dir.glob("*.json"),
+                           *paths.data_dir.rglob("*")) if p.is_file()]
         old += [p for p in paths.reports_dir.glob("*") if p.is_file()]
         if old:  # a fresh run must never mistake earlier outputs for its own
             arch = paths.research_dir / "_archive" / stamp
@@ -150,6 +177,14 @@ class Workflow:
                 "history": [_event(f"input validated for {state['company']} -> key {state['key']}"
                                    + (f"; archived {len(old)} earlier files" if old else ""))]}
 
+    async def data_pack(self, state: dict) -> dict:
+        """Stage 0: deterministic SEC XBRL data pack shared by every agent. Never fails the run: if the data
+        cannot be fetched, the pack says so and the agents research everything as before."""
+        paths = self.paths(state)
+        t0 = time.time()
+        note = await asyncio.to_thread(datapack.build, paths, state["company"])
+        return {"history": [_event(f"data pack: {note} ({time.time() - t0:.1f}s)")]}
+
     def agent_node(self, agent: str):
         async def node(state: dict) -> dict:
             return await self._execute(agent, state)
@@ -160,7 +195,8 @@ class Workflow:
         stale = validators.check_fresh_inputs(paths, "review")
         if stale:
             raise NodeFailure(f"review blocked, stale inputs: {stale}", "review")
-        upd = await self._execute("review", state)
+        prev = [contracts.Finding.model_validate(f) for f in state.get("findings", [])]
+        upd = await self._execute("review", state, previous_findings=prev)
         rev = contracts.load_review(paths.sidecar("review"))
         n_high_correctable = sum(contracts.is_correctable(f, "HIGH") for f in rev.findings)
         n_medium_correctable = sum(contracts.is_correctable(f, "MEDIUM") for f in rev.findings)
@@ -265,6 +301,7 @@ class Workflow:
              f"{summary['medium_correction_iterations']} MEDIUM")
         print(f"  Unresolved HIGH issues: {len(summary['unresolved_high_issues'])}")
         print(f"  Unresolved MEDIUM issues: {len(summary['unresolved_medium_issues'])}")
+        print(f"  Wall time: {(summary['wall_seconds'] or 0) / 60:.1f} min")
         print(f"  Report:  {summary['final_report']}")
         print(f"  Summary: {paths.rel(paths.reports_dir / 'run_summary.md')}")
         notify(f"Buffett: {state['company']} - analysis {summary['workflow_status']}",

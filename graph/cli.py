@@ -9,7 +9,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .agent_runner import SdkRunner
+from .agent_runner import SdkRunner, Usage
 from .build_graph import build_graph
 from .config import ROOT, Paths, checkpoint_db_path, company_key, key_of, log_path, validate_run_id
 from .nodes import NodeFailure, UsageLimitReached
@@ -67,8 +67,10 @@ async def run(company: str | None, run_id: str, resume: bool) -> int:
             msg = f"{type(e).__name__}: {e}"
             paused = isinstance(e, UsageLimitReached)
             if isinstance(e, NodeFailure) and e.agent:   # show the stopped agent, not 'not_run'
+                prior = values.get("status", {}).get(e.agent, {})
+                spent = Usage.accumulate(prior, e.usage.record()) if e.usage else {}
                 values["status"] = {**values.get("status", {}), e.agent: {
-                    **values.get("status", {}).get(e.agent, {}), "state": "paused" if paused else "failed"}}
+                    **prior, **spent, "state": "paused" if paused else "failed"}}
             write_summary(paths, values, error=msg, paused=paused)
             resume_cmd = f"python -m graph --resume {run_id}"
             notify(f"Buffett: {values.get('company') or company} - workflow {'PAUSED' if paused else 'FAILED'}",

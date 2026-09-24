@@ -66,7 +66,8 @@ def _check_review(text: str, rev: contracts.ReviewSidecar) -> list[str]:
     else:
         c = rev.counts
         if summ[:3] != (c.high, c.medium, c.low):
-            errs.append(f"summary line counts {summ[:3]} disagree with sidecar {(c.high, c.medium, c.low)}")
+            errs.append(f"summary line counts {summ[:3]} disagree with the sidecar findings, which contain "
+                        f"{c.high} HIGH, {c.medium} MEDIUM, {c.low} LOW")
     for f in rev.findings:
         if f.id not in text:
             errs.append(f"finding id {f.id!r} from sidecar does not appear in review.md")

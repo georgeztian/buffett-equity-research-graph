@@ -11,7 +11,8 @@ from pathlib import Path
 
 from .agent_runner import SdkRunner, Usage
 from .build_graph import build_graph
-from .config import ROOT, Paths, checkpoint_db_path, company_key, key_of, log_path, validate_run_id
+from .config import (ROOT, Paths, checkpoint_db_path, company_key, key_of, log_path, resume_command,
+                     validate_run_id)
 from .nodes import NodeFailure, UsageLimitReached
 from .notify import notify
 from .summary import write_summary
@@ -57,7 +58,7 @@ async def run(company: str | None, run_id: str, resume: bool) -> int:
         else:
             inp = {"company": company, "key": key, "run_id": run_id,
                    "started_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
-        print(f"Run id: {run_id}  (resume with: python -m graph --resume {run_id})", flush=True)
+        print(f"Run id: {run_id}  (resume with: {resume_command(run_id)})", flush=True)
         try:
             await graph.ainvoke(inp, config)
             return 0
@@ -72,7 +73,7 @@ async def run(company: str | None, run_id: str, resume: bool) -> int:
                 values["status"] = {**values.get("status", {}), e.agent: {
                     **prior, **spent, "state": "paused" if paused else "failed"}}
             write_summary(paths, values, error=msg, paused=paused)
-            resume_cmd = f"python -m graph --resume {run_id}"
+            resume_cmd = resume_command(run_id)
             notify(f"Buffett: {values.get('company') or company} - workflow {'PAUSED' if paused else 'FAILED'}",
                    f"{msg[:180]} Resume: {resume_cmd}")
             if paused:

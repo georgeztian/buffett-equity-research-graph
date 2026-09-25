@@ -1,4 +1,4 @@
-"""Best-effort desktop notifications for a run (completion, failures, rejections). Never raises, never blocks,
+"""Best-effort desktop notifications for a run (completion, failure, usage-limit pause). Never raises, never blocks,
 opens no window, and writes no files: title and message reach the OS notifier through the environment."""
 from __future__ import annotations
 

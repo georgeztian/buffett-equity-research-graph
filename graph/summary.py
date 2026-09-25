@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 
-from .config import ALL_AGENTS, Paths
+from .config import ALL_AGENTS, Paths, resume_command
 
 
 def usage_totals(agents: dict[str, dict]) -> dict:
@@ -64,7 +64,7 @@ def render_markdown(s: dict) -> str:
     if s["error"]:
         lines.append(f"- Error: {s['error']}")
     if s["workflow_status"] == "PAUSED":
-        lines.append(f"- Paused by a Claude usage limit. After it resets, run: `python -m graph --resume {s['run_id']}`")
+        lines.append(f"- Paused by a Claude usage limit. After it resets, run: `{resume_command(s['run_id'])}`")
     lines += ["", "## Agent execution status", "",
               "| Agent | State | Runs | Attempts (last run) | Time, all runs | Est. cost, all runs | Output tokens | "
               "Input tokens (uncached / cache read / cache write) |",

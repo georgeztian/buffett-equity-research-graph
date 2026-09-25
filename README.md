@@ -8,13 +8,13 @@ A multi-agent research workflow for Claude Code that analyzes a publicly traded 
 
 ## How it works
 
-Specialized agents run in five stages, and no agent starts until the analyses it depends on are complete.
+A deterministic data step (Stage 0) is followed by five agent stages, and no agent starts until the analyses it depends on are complete.
 
 0. **SEC data pack:** before the agents start, the graph pulls the company's annual XBRL financials from SEC EDGAR once and writes `research/<KEY>/_data/financials.md`: values exactly as filed with their filing references, plus a few reference calculations with their formulas. Every agent reads the same numbers instead of each fetching and re-deriving them. If the company is not an SEC filer with US-GAAP XBRL data, the pack says so and the agents research as before. Set `SEC_USER_AGENT` to change the User-Agent sent to SEC.
 1. **Research (in parallel):** the moat, management, and valuation agents each analyze one aspect of the company.
 2. **Margin of safety:** the MOS agent compares the current price with the estimated intrinsic value, using the Stage 1 results.
 3. **Independent review:** a reviewer agent audits all research and rates every problem HIGH, MEDIUM, or LOW.
-4. **Correction loop:** if there are HIGH-severity issues, only the affected agents are re-run (plus any downstream agents), then the reviewer checks again. This repeats up to 5 times. If a HIGH issue is still open after the 5th round, the workflow stops correcting and goes straight to Stage 5 with it flagged unresolved — MEDIUM issues are not attempted in that case. Only once every HIGH issue has actually been resolved does the same loop run again for MEDIUM-severity issues, up to 2 times; a MEDIUM issue still open after that is likewise flagged unresolved. LOW-severity issues are never corrected.
+4. **Correction loop:** if there are HIGH-severity issues, only the affected agents are re-run (plus any downstream agents), then the reviewer checks again. This repeats up to 5 times. If a HIGH issue is still open after the 5th round, the workflow stops correcting and goes straight to Stage 5 with it flagged unresolved — MEDIUM issues are not attempted in that case (any that are open are flagged unresolved in the report). Only once every HIGH issue in the analyses has actually been resolved does the same loop run again for MEDIUM-severity issues, up to 2 times; a MEDIUM issue still open after that is likewise flagged unresolved. LOW-severity issues are never corrected. Issues the reviewer assigns to the final report itself (for example presentation, or the Financial Quality section the report agent writes) do not loop back; they are passed to the report agent to address in Stage 5.
 5. **Report:** the report agent writes the final investment report once the review has passed, or once a correction loop has run out of rounds with issues of its severity still open (HIGH takes priority: reaching its cap goes straight to Stage 5 without any MEDIUM attempt).
 
 
@@ -31,7 +31,8 @@ The workflow is implemented as a LangGraph in `graph/`. **Code owns control flow
   skills/      Buffett analysis methodology (with reference files) and the run skill
   settings.json  Pre-approved commands for running the graph
 graph/           LangGraph implementation: nodes, routing, validators, contracts, runner, SEC data pack, CLI
-research/<KEY>/  Intermediate analyses and the review, per company (gitignored)
+research/<KEY>/  Intermediate analyses and the review, per company (gitignored); _data/ SEC data pack,
+                 _meta/ sidecars and manifest, _archive/ outputs of earlier runs (moved aside by a fresh run)
 reports/<KEY>/   Final investment report and run summary, per company (gitignored)
 .state/          Checkpoint database and detached-run logs (gitignored)
 requirements.txt Python dependencies
@@ -42,7 +43,7 @@ LICENSE          MIT license
 
 ## How to use
 
-One-time setup (on macOS/Linux, use `.venv/bin/python` wherever `.venv/Scripts/python` appears below):
+One-time setup, with Python 3.11 or newer (on macOS/Linux, use `.venv/bin/python` wherever `.venv/Scripts/python` appears below):
 
 ```
 python -m venv .venv

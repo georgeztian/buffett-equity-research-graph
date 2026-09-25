@@ -30,6 +30,7 @@ The log holds timestamped progress lines (agent started / rejected / complete, r
 ## Outputs (per company, folder key = ticker if given, otherwise a slug of the name)
 
 - `research/<KEY>/moat.md`, `management.md`, `valuation.md`, `mos.md`, `review.md`
+- `research/<KEY>/_data/financials.md` — the Stage 0 SEC XBRL data pack shared by all agents
 - `research/<KEY>/_meta/` — structured sidecars and content-hash manifest (machine-readable)
 - `reports/<KEY>/final_investment_report.md`
 - `reports/<KEY>/run_summary.md` and `run_summary.json` — workflow execution summary

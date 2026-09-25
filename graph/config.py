@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -75,6 +76,14 @@ def checkpoint_db_path() -> Path:
 
 
 RUN_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9.\-]*-\d{8}-\d{6}")   # <KEY>-YYYYmmdd-HHMMSS
+
+
+def resume_command(run_id: str) -> str:
+    """The resume command as the user should type it: the project venv's python when that is what is running
+    (the form documented and pre-approved in .claude/settings.json), else plain `python`."""
+    exe = Path(sys.executable)
+    py = exe.relative_to(ROOT).with_suffix("").as_posix() if exe.is_relative_to(ROOT) else "python"
+    return f"{py} -m graph --resume {run_id}"
 
 
 def validate_run_id(run_id: str) -> str:

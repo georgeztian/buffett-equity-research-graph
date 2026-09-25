@@ -1,7 +1,7 @@
 """Stage 0: deterministic SEC data pack, shared by every agent in a run.
 
-Pulls the company's annual XBRL facts from SEC EDGAR once, so the three Stage 1 agents, the reviewer and the
-report agent all work from the same primary-source numbers instead of each fetching (and re-deriving) them.
+Pulls the company's annual XBRL facts from SEC EDGAR once, so the three Stage 1 agents, the MOS agent, the
+reviewer and the report agent all work from the same primary-source numbers instead of each fetching (and re-deriving) them.
 No model is involved. Values are copied exactly as filed; every row names its XBRL tag (different tags are never
 merged into one row); the few reference calculations show their formulas and inputs. If anything fails, the
 pack says it is unavailable and the agents research everything as before, so this stage can never fail a run.

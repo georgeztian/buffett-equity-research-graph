@@ -52,7 +52,7 @@ python -m venv .venv
 .venv/Scripts/python -m graph --set-sec-contact "Your Name you@yourdomain.com"   # optional, recommended
 ```
 
-The last line is optional but recommended: it enables the SEC data pack. SEC EDGAR asks every automated client to identify itself with a name and contact email in the User-Agent header, so the graph never sends SEC a request without yours. Use your own name and email. They are saved only in this project's `.env` file, which is gitignored (so it is never committed or shared), and are sent only to SEC. You can also copy `.env.example` to `.env` and edit it, or set the `SEC_USER_AGENT` environment variable, which takes precedence over `.env`.
+The last line is optional but recommended: it enables the SEC data pack. SEC EDGAR asks every automated client to identify itself with a name and contact email in the User-Agent header, so the graph never sends SEC a request without yours. Use your own name and email. They are saved only in this project's `.env` file, which is gitignored (so it is never committed or shared), and are sent only to SEC. Alternatively, you can also 1) edit `.env.example` with your name and contact then rename it to `.env`, or 2) set the `SEC_USER_AGENT` environment variable, which takes precedence over `.env`.
 
 If no contact is set, a run started from a terminal asks for it once; press Enter to skip. Skipping is remembered (`SEC_USER_AGENT=declined` in `.env`, or `--set-sec-contact declined`), so you are not asked again. Runs without a contact, including detached runs and runs started by Claude, still go ahead: Stage 0 is skipped, the agents research all figures as before, and the run summary says the data pack was not used. To enable it later, run `--set-sec-contact` with your name and email.
 

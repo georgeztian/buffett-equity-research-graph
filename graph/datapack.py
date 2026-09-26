@@ -310,9 +310,9 @@ def build(paths: Paths, company: str) -> str:
 
 def _build(paths: Paths, company: str) -> str:
     ua, problem = sec_contact()
-    if not ua:   # SEC would answer 403, so do not send anonymous requests
-        return _unavailable(paths, company, f"{problem}; set your name and email with "
-                                            "`python -m graph --set-sec-contact`")
+    if not ua:   # never send SEC a request without the user's own contact
+        return _unavailable(paths, company, f"SEC not contacted: {problem}; to enable the data pack, set your name "
+                                            "and email with `python -m graph --set-sec-contact`")
     tickers = _get_json(TICKERS_URL, ua)
     found = resolve_cik(company, paths.key, tickers)
     if not found:

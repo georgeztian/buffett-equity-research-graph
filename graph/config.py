@@ -16,9 +16,10 @@ AGENT_TIMEOUT_SECONDS = 45 * 60
 # The SDK's default 1 MB per-message limit is exceeded when an agent fetches a large filing
 # (e.g. a 10-K page), which kills the attempt with "JSON message exceeded maximum buffer size".
 AGENT_MAX_BUFFER_BYTES = 100 * 1024 * 1024
-# SEC EDGAR requires automated clients to identify themselves with a name and a contact email, and answers
+# SEC EDGAR requires automated clients to identify themselves with a name and a contact email, and may answer
 # 403 Forbidden otherwise. Each user supplies their own, in the SEC_USER_AGENT env var or the gitignored
-# project .env file; there is deliberately no built-in default. See sec_contact().
+# project .env file; there is deliberately no built-in default, and no request is ever sent without a contact.
+# The contact is optional: without one, Stage 0 skips SEC and the agents research as before. See sec_contact().
 ENV_FILE = ROOT / ".env"
 SEC_TIMEOUT_SECONDS = 30
 DATA_PACK_YEARS = 15         # fiscal years of XBRL history in the data pack
@@ -75,9 +76,12 @@ _EMAIL = re.compile(r"[^\s@<>]+@[^\s@<>]+\.[A-Za-z]{2,}")
 # Placeholder domains (.env.example and the help text use them), never a real user's contact.
 _PLACEHOLDER_DOMAINS = ("example.com", "example.org", "example.net", "domain.com", "yourdomain.com")
 
+# SEC_USER_AGENT value that records the user's choice to run without a contact (and not be asked again).
+SEC_DECLINED = "declined"
+
 SEC_SETUP_HELP = (
-    "SEC EDGAR requires every user to identify themselves with a name and a contact email (it answers\n"
-    "403 Forbidden otherwise). Set yours once for this project; it is saved in the gitignored .env file:\n"
+    "The SEC data pack is optional. To enable it, SEC EDGAR requires your name and a contact email; set them\n"
+    "once for this project (saved in the gitignored .env file, sent only to SEC):\n"
     '  python -m graph --set-sec-contact "Your Name you@yourdomain.com"\n'
     "(or set the SEC_USER_AGENT environment variable, which takes precedence over .env)."
 )
@@ -110,13 +114,29 @@ def _read_env_file(name: str) -> str | None:
     return next((l.partition("=")[2].strip().strip("\"'") for l in lines if _env_key(l) == name), None)
 
 
+def _sec_setting() -> tuple[str | None, str]:
+    """(raw SEC_USER_AGENT value or None, where it came from): the environment first, else the project .env."""
+    env = os.environ.get("SEC_USER_AGENT")
+    return (env, "the SEC_USER_AGENT environment variable") if env else (_read_env_file("SEC_USER_AGENT"), ".env")
+
+
+def is_declined(value: str | None) -> bool:
+    return (value or "").strip().strip("\"'").lower() == SEC_DECLINED
+
+
+def sec_contact_declined() -> bool:
+    """True if the user chose to run without an SEC contact (SEC_USER_AGENT=declined)."""
+    return is_declined(_sec_setting()[0])
+
+
 def sec_contact() -> tuple[str | None, str]:
     """(User-Agent, "") for this user's SEC contact: SEC_USER_AGENT from the environment, else from the project
-    .env file. (None, why) if it is missing or not a valid name + contact email."""
-    env = os.environ.get("SEC_USER_AGENT")
-    raw, where = (env, "the SEC_USER_AGENT environment variable") if env else (_read_env_file("SEC_USER_AGENT"), ".env")
+    .env file. (None, why) if it is missing, declined, or not a valid name + contact email."""
+    raw, where = _sec_setting()
     if not raw:
         return None, "SEC contact not set"
+    if is_declined(raw):
+        return None, f"SEC contact declined (set in {where})"
     try:
         return check_sec_user_agent(raw), ""
     except ValueError as e:
@@ -124,8 +144,9 @@ def sec_contact() -> tuple[str | None, str]:
 
 
 def save_sec_user_agent(value: str) -> str:
-    """Validate and write SEC_USER_AGENT into the project .env, keeping any other lines. Returns the value."""
-    v = check_sec_user_agent(value)
+    """Write SEC_USER_AGENT into the project .env, keeping any other lines: a validated contact, or `declined`
+    to record that the user chose to run without one. Returns the value written."""
+    v = SEC_DECLINED if is_declined(value) else check_sec_user_agent(value)
     try:
         lines = ENV_FILE.read_text(encoding="utf-8").splitlines()
     except FileNotFoundError:

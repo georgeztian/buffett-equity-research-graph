@@ -21,6 +21,8 @@ To determine the estimated intrinsic value and how much margin of safety is need
 `research/<KEY>/management.md`
 `research/<KEY>/valuation.md`
 
+Use the current share price, with its source and date, exactly as stated in `research/<KEY>/valuation.md`, so both analyses measure against the same price. If it looks materially out of date, say so rather than substituting another price.
+
 Do not independently redefine the Buffett margin of safety framework.
 Do not make the final investment recommendation.
 Do not independently redo the entire valuation.

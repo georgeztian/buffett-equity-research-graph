@@ -183,7 +183,7 @@ class Workflow:
         paths = self.paths(state)
         t0 = time.time()
         note = await asyncio.to_thread(datapack.build, paths, state["company"])
-        return {"history": [_event(f"data pack: {note} ({time.time() - t0:.1f}s)")]}
+        return {"data_pack": note, "history": [_event(f"data pack: {note} ({time.time() - t0:.1f}s)")]}
 
     def agent_node(self, agent: str):
         async def node(state: dict) -> dict:

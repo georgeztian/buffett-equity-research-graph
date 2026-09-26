@@ -41,6 +41,7 @@ def build_summary(paths: Paths, state: dict, error: str | None = None, paused: b
         "wall_seconds": _elapsed(state.get("started_at"), finished),   # includes any paused time between resumes
         "workflow_status": "COMPLETE" if complete else "PAUSED" if paused else "FAILED",
         "error": error,
+        "data_pack": state.get("data_pack"),
         "agents": agents,
         "usage": usage_totals(agents),
         "high_correction_iterations": state.get("high_iteration", 0),
@@ -60,6 +61,12 @@ def render_markdown(s: dict) -> str:
              f"- HIGH correction rounds performed: {s['high_correction_iterations']}",
              f"- MEDIUM correction rounds performed: {s['medium_correction_iterations']}",
              f"- Final report: {s['final_report'] or 'not produced'}"]
+    dp = s.get("data_pack")
+    if dp and dp.startswith("unavailable"):
+        lines.append(f"- SEC data pack: **NOT USED** — {dp}. The agents researched all figures from primary sources "
+                     "themselves, without the shared SEC numbers.")
+    elif dp:
+        lines.append(f"- SEC data pack: {dp}")
     if s["error"]:
         lines.append(f"- Error: {s['error']}")
     if s["workflow_status"] == "PAUSED":

@@ -159,7 +159,8 @@ class SdkRunner:
         allowed = {ensure_inside(task.cwd, p).resolve() for p in task.allowed_writes}
 
         async def guard(tool: str, tool_input: dict, _ctx):
-            if tool == "Read" and (task.cwd / tool_input.get("file_path", "")).resolve() == ENV_FILE.resolve():
+            target = tool_input.get("file_path") or tool_input.get("path") or ""
+            if tool in ("Read", "Grep") and target and (task.cwd / target).resolve() == ENV_FILE.resolve():
                 return PermissionResultDeny(message="the user's private settings file is not readable")
             if tool in READ_TOOLS:
                 return PermissionResultAllow()

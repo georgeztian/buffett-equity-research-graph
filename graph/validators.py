@@ -62,11 +62,11 @@ def _check_review(text: str, rev: contracts.ReviewSidecar) -> list[str]:
     errs = []
     summ = contracts.parse_summary_line(text)
     if summ is None:
-        errs.append("review.md must end with 'H HIGH, M MEDIUM, L LOW; U HIGH unresolved' summary line")
+        errs.append("review.md must end with the line 'Summary: H HIGH, M MEDIUM, L LOW'")
     else:
         c = rev.counts
-        if summ[:3] != (c.high, c.medium, c.low):
-            errs.append(f"summary line counts {summ[:3]} disagree with the sidecar findings, which contain "
+        if summ != (c.high, c.medium, c.low):
+            errs.append(f"summary line counts {summ} disagree with the sidecar findings, which contain "
                         f"{c.high} HIGH, {c.medium} MEDIUM, {c.low} LOW")
     for f in rev.findings:
         if f.id not in text:

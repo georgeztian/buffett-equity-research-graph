@@ -51,11 +51,16 @@ Classify severity:
 Save your review to:
 `research/<KEY>/review.md`
 
-A HIGH issue must be corrected before the final report (unless the maximum number of HIGH-severity correction iterations defined in the workflow has been reached; then list it as unresolved).
+Record every issue that is open after your review, at every severity. You audit and classify; the workflow decides what gets corrected:
 
-A MEDIUM issue is also corrected before the final report, within its own, shorter cap of correction iterations (defined in the workflow) — but only once every HIGH issue in the analyses (moat, management, valuation, MOS) is resolved. If the HIGH cap is reached with HIGH issues still unresolved, the workflow goes straight to the final report without attempting any MEDIUM correction; in that case list any open MEDIUM issue too, but only as a note for the report, not as something you corrected. If a MEDIUM issue is still open once its own cap is reached (after HIGH was fully resolved), list it as unresolved. LOW issues are recorded for the record but are never required to be corrected.
+- HIGH issues in the analyses (moat, management, valuation, MOS) are sent back for correction first, up to the workflow's HIGH cap of correction rounds.
+- MEDIUM issues in the analyses are sent back only once no such HIGH issue remains, up to the workflow's own, shorter MEDIUM cap.
+- LOW issues are recorded for the record and never corrected.
+- An issue still open when its cap is reached (including every MEDIUM issue when the HIGH cap is reached first) goes to the final report flagged as unresolved.
 
-End the review with a summary line stating the total number of HIGH, MEDIUM, and LOW issues, and the number of HIGH issues still unresolved.
+On a re-review, state for each previously reported issue whether it is now fixed, and record only the issues still open.
+
+End the review with a summary line stating the total number of open HIGH, MEDIUM, and LOW issues.
 
 Do not write the final report.
 Do not make any unauthorized git commits.

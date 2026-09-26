@@ -1,5 +1,5 @@
 """python -m graph --company "American Express (AXP)" [--detach] | --resume RUN_ID | --print-graph
-                  | --set-sec-contact "Your Name you@yourdomain.com"
+                  | --set-sec-contact "Your Name you@yourdomain.com" | --set-sec-contact declined
 """
 from __future__ import annotations
 
@@ -13,8 +13,8 @@ from pathlib import Path
 
 from .agent_runner import SdkRunner, Usage
 from .build_graph import build_graph
-from .config import (ROOT, SEC_SETUP_HELP, Paths, checkpoint_db_path, company_key, key_of, log_path,
-                     resume_command, save_sec_user_agent, sec_contact, validate_run_id)
+from .config import (ROOT, SEC_DECLINED, SEC_SETUP_HELP, Paths, checkpoint_db_path, company_key, key_of, log_path,
+                     resume_command, save_sec_user_agent, sec_contact, sec_contact_declined, validate_run_id)
 from .nodes import NodeFailure, UsageLimitReached
 from .notify import notify
 from .summary import write_summary
@@ -108,33 +108,49 @@ def detach(run_id: str, child_args: list[str]) -> int:
 
 
 def set_sec_contact(value: str) -> bool:
-    """Save the user's SEC contact to .env; False (with the reason printed) if it is not valid."""
+    """Save the user's SEC contact (or `declined`) to .env; False (with the reason printed) if it is not valid."""
     try:
         v = save_sec_user_agent(value)
     except ValueError as e:
         print(f"Not saved: {e}\n{SEC_SETUP_HELP}", file=sys.stderr)
         return False
-    print(f"Saved SEC_USER_AGENT={v} to .env (gitignored).")
+    if v == SEC_DECLINED:
+        print(f"Saved SEC_USER_AGENT={v} to .env (gitignored): runs go ahead without the SEC data pack and do "
+              "not ask again. To enable it later, set your contact with --set-sec-contact.")
+    else:
+        print(f"Saved SEC_USER_AGENT={v} to .env (gitignored).")
     if os.environ.get("SEC_USER_AGENT"):
         print("Note: the SEC_USER_AGENT environment variable is also set and takes precedence over .env.")
     return True
 
 
-def ensure_sec_contact() -> bool:
-    """Setup prerequisite for a new run: this user's own SEC contact (Stage 0 needs it). Asks for it when run
-    from a terminal; otherwise prints how to set it. An invalid environment variable is never overridden."""
+def check_sec_contact() -> None:
+    """Optional setup before a new run; never blocks it. Without a valid contact, Stage 0 sends nothing to SEC
+    and the agents research without the data pack. From a terminal it asks once (Enter skips, and the skip is
+    remembered in .env); otherwise it prints a note. An environment variable is never overridden."""
     ua, problem = sec_contact()
     if ua:
-        return True
+        return
+    if sec_contact_declined():
+        print(f"Note: {problem}: this run goes ahead without the SEC data pack.")
+        return
     if not os.environ.get("SEC_USER_AGENT") and sys.stdin.isatty():
-        print("One-time setup: SEC EDGAR requires your name and a contact email. They are saved only in this\n"
-              "project's .env file (gitignored) and sent only to SEC.")
+        print("Optional one-time setup: the SEC data pack gives every agent the company's financials straight from\n"
+              "SEC filings. SEC EDGAR requires your name and a contact email for it; they are saved only in this\n"
+              "project's .env file (gitignored) and sent only to SEC. Press Enter to skip: the run then goes ahead\n"
+              "without the data pack, and you will not be asked again.")
         try:
-            return set_sec_contact(f"{input('Your name: ').strip()} {input('Your contact email: ').strip()}")
+            name = input("Your name (Enter to skip): ").strip()
+            if not name:
+                set_sec_contact(SEC_DECLINED)
+                return
+            if set_sec_contact(f"{name} {input('Your contact email: ').strip()}"):
+                return
+            print("Nothing saved: this run goes ahead without the SEC data pack; you will be asked again next time.")
+            return
         except EOFError:   # no one to answer (on Windows a NUL stdin still reports itself as a terminal)
             print()
-    print(f"{problem}.\n{SEC_SETUP_HELP}", file=sys.stderr)
-    return False
+    print(f"Note: {problem}: this run goes ahead without the SEC data pack.\n{SEC_SETUP_HELP}", file=sys.stderr)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -146,7 +162,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--run-id", help=argparse.SUPPRESS)   # internal: lets --detach fix the id up front
     ap.add_argument("--print-graph", action="store_true", help="print the graph as a Mermaid diagram and exit")
     ap.add_argument("--set-sec-contact", metavar='"NAME EMAIL"',
-                    help="save your name and contact email for SEC EDGAR requests to the project .env, and exit")
+                    help="save your name and contact email for SEC EDGAR requests to the project .env, and exit "
+                         f"(or '{SEC_DECLINED}' to run without the SEC data pack and not be asked again)")
     a = ap.parse_args(argv)
 
     if a.set_sec_contact is not None:
@@ -168,8 +185,8 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError as e:   # bad run id (e.g. path traversal) or company with no usable folder key
         print(e, file=sys.stderr)
         return 2
-    if not resume and not ensure_sec_contact():
-        return 2
+    if not resume and not a.run_id:   # asked once, by the launching process (not again by a --detach child)
+        check_sec_contact()
     if a.detach:
         return detach(run_id, child)
     return asyncio.run(run(a.company, run_id, resume))

@@ -56,13 +56,13 @@ class ReportSidecar(BaseModel):
 
 
 SUMMARY_LINE = re.compile(
-    r"(\d+)\s+HIGH\b[^0-9\n]{0,40}?(\d+)\s+MEDIUM\b[^0-9\n]{0,40}?(\d+)\s+LOW\b[^0-9\n]{0,80}?(\d+)\s+HIGH[^\n]*unresolved",
-    re.IGNORECASE,
+    r"^\W*Summary:\s*(\d+)\s+HIGH\b[^0-9\n]{0,40}?(\d+)\s+MEDIUM\b[^0-9\n]{0,40}?(\d+)\s+LOW\b",
+    re.IGNORECASE | re.MULTILINE,
 )
 
 
-def parse_summary_line(text: str) -> tuple[int, int, int, int] | None:
-    """Last 'H HIGH, M MEDIUM, L LOW; U HIGH unresolved' line in the review, if any."""
+def parse_summary_line(text: str) -> tuple[int, int, int] | None:
+    """Last 'Summary: H HIGH, M MEDIUM, L LOW' line in the review, if any."""
     found = SUMMARY_LINE.findall(text)
     return tuple(int(x) for x in found[-1]) if found else None  # type: ignore[return-value]
 

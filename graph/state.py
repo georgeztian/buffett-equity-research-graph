@@ -14,6 +14,7 @@ class GraphState(TypedDict, total=False):
     key: str
     run_id: str
     started_at: str
+    data_pack: str                                   # Stage 0 outcome: data source note, or "unavailable (reason)"
     iteration: int                                   # total correction rounds completed (HIGH + MEDIUM)
     high_iteration: int                               # HIGH-severity correction rounds completed (cap: MAX_CORRECTIONS)
     medium_iteration: int                             # MEDIUM-severity correction rounds completed (cap: MAX_MEDIUM_CORRECTIONS)

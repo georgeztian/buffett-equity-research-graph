@@ -97,18 +97,21 @@ def system_prompt(root: Path, paths: Paths, agent: str, company: str, iteration:
             "- Give every finding a unique id (R1, R2, ...) and write that id next to the finding in review.md.",
             "- Set `owner` to the single agent whose file must change: moat, management, valuation, mos, "
             "or `report` if only the final report can fix it (e.g. presentation, financial quality section).",
-            "- The sidecar holds only `findings`; the workflow counts them itself.",
-            "- The LAST line of review.md must be exactly: "
-            "`Summary: H HIGH, M MEDIUM, L LOW; U HIGH unresolved` with real numbers "
-            "(H, M and L equal the number of sidecar findings of each severity; U = HIGH findings still open after "
-            "this review).",
+            "- The sidecar `findings` list holds ONLY issues that are open after this review, at every severity. "
+            "An issue you verified as fixed is reported as fixed in review.md and left out of the sidecar: the "
+            "workflow sends every HIGH and MEDIUM finding in the sidecar to its owner for correction.",
+            "- The workflow counts the findings itself and decides what is corrected; you only audit and classify.",
+            "- The LAST line of review.md must be exactly `Summary: H HIGH, M MEDIUM, L LOW` with real numbers: "
+            "H, M and L equal the number of sidecar findings of each severity.",
         ]
         if high_iteration >= MAX_CORRECTIONS:
-            contract.append("- The maximum number of HIGH-severity correction iterations has been reached: "
-                            "list any remaining HIGH issue as unresolved.")
+            contract.append("- The maximum number of HIGH-severity correction rounds has been reached: any HIGH "
+                            "finding owned by moat, management, valuation or mos that you record now will not be "
+                            "corrected; it goes to the final report flagged as unresolved.")
         if medium_iteration >= MAX_MEDIUM_CORRECTIONS:
-            contract.append("- The maximum number of MEDIUM-severity correction iterations has been reached: "
-                            "list any remaining MEDIUM issue as unresolved.")
+            contract.append("- The maximum number of MEDIUM-severity correction rounds has been reached: any MEDIUM "
+                            "finding owned by moat, management, valuation or mos that you record now will not be "
+                            "corrected; it goes to the final report flagged as unresolved.")
     if agent == "report":
         contract.append("- Use exactly the upstream scores given in the task for `scores_reported`; do not average them.")
     sections = [
@@ -137,16 +140,21 @@ def user_prompt(paths: Paths, agent: str, company: str, *, findings=(), upstream
     if agent in ANALYSTS and (findings or upstream_changed) and iteration:
         round_label = (f"MEDIUM correction round {medium_iteration} of {MAX_MEDIUM_CORRECTIONS}" if phase == "medium"
                        else f"HIGH correction round {high_iteration} of {MAX_CORRECTIONS}")
+        why = ("failed independent review" if findings else
+               "must be brought up to date because upstream research files it depends on changed in this round")
+        todo = ("fix exactly the problems below" + (" and make the analysis consistent with the changed upstream "
+                                                   "files" if upstream_changed else "")
+                if findings else "re-read the upstream research files and make this analysis consistent with them")
         parts.append(f"\n## CORRECTION RUN ({round_label})\n"
-                     f"Your existing file `{paths.rel(paths.output(agent))}` failed independent review. "
-                     "Update it in place: fix exactly the problems below, change anything else only where these fixes require it, "
+                     f"Your existing file `{paths.rel(paths.output(agent))}` {why}. "
+                     f"Update it in place: {todo}; change anything else only where this requires it, "
                      "and rewrite your sidecar. Make the changes as targeted edits (the Edit tool) to the affected "
                      "passages, including every figure or conclusion elsewhere in the file that depends on them, rather "
                      "than rewriting the whole file.")
         if findings:
             parts.append(_fmt_findings(findings))
-        if upstream_changed:
-            parts.append("Upstream research files changed in this round; re-read them and make this analysis consistent with them.")
+        if findings and upstream_changed:
+            parts.append("Upstream research files also changed in this round; re-read them.")
     if agent == "review" and iteration:
         parts.append(f"\nThis re-reviews corrections made in round {iteration}. Re-audit everything, and explicitly verify "
                      "the previously reported issues are fixed.")

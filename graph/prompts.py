@@ -7,7 +7,7 @@ import re
 from datetime import date
 from pathlib import Path
 
-from .config import AGENT_FILE, ANALYSTS, MAX_CORRECTIONS, MAX_MEDIUM_CORRECTIONS, Paths
+from .config import AGENT_FILE, ANALYSTS, DEPENDS, MAX_CORRECTIONS, MAX_MEDIUM_CORRECTIONS, Paths
 
 SKILL_DIR = Path(".claude/skills/buffett-analysis")
 
@@ -24,6 +24,16 @@ def load_skill_body(root: Path) -> str:
     return _strip_frontmatter((root / SKILL_DIR / "SKILL.md").read_text(encoding="utf-8"))
 
 
+def load_data_rules(root: Path) -> str:
+    """The "Data Rules" section of CLAUDE.md. Agents run without project settings (so CLAUDE.md is not loaded for
+    them); the rules are passed on verbatim so CLAUDE.md stays their single source."""
+    text = (root / "CLAUDE.md").read_text(encoding="utf-8").replace("\r\n", "\n")
+    m = re.search(r"^## Data Rules[ \t]*\n(.*?)(?=^## |\Z)", text, re.MULTILINE | re.DOTALL)
+    if not m or not m.group(1).strip():
+        raise ValueError("CLAUDE.md has no '## Data Rules' section")
+    return m.group(1).strip()
+
+
 # Reference files each agent's instructions tell it to read (valuation.md is named by the moat, management and
 # margin-of-safety references for the operating-income-after-taxes definition; the reviewer checks all four).
 # They are included in the system prompt so the agent does not spend tool calls reading them.
@@ -31,6 +41,7 @@ REFERENCES: dict[str, tuple[str, ...]] = {
     "moat": ("economic_moat", "valuation"),
     "management": ("management_quality", "valuation"),
     "valuation": ("valuation",),
+    "business": (),
     "mos": ("margin_of_safety", "valuation"),
     "review": ("economic_moat", "management_quality", "valuation", "margin_of_safety"),
     "report": (),
@@ -47,7 +58,7 @@ def load_references(root: Path, agent: str) -> str:
 
 
 def _sidecar_schema(agent: str) -> str:
-    if agent in ANALYSTS:
+    if agent in ANALYSTS or agent == "business":
         return ('{"score": <integer 1-10, the same score stated in your markdown file>, '
                 '"summary": "<one sentence>"}')
     if agent == "review":
@@ -84,7 +95,7 @@ def system_prompt(root: Path, paths: Paths, agent: str, company: str, iteration:
         "containing ONLY valid JSON of this shape:",
         _sidecar_schema(agent),
     ]
-    if agent in ANALYSTS:
+    if agent in ANALYSTS or agent == "business":
         contract.append(
             "- Label substantive statements in your markdown as FACT, CALCULATION, ASSUMPTION or JUDGMENT, "
             "record source and period for key numbers, and state your 1-10 score explicitly under the word 'Score'.")
@@ -96,10 +107,14 @@ def system_prompt(root: Path, paths: Paths, agent: str, company: str, iteration:
             "(these only start once no correctable HIGH finding remains; LOW findings are never corrected).",
             "- Give every finding a unique id (R1, R2, ...) and write that id next to the finding in review.md.",
             "- Set `owner` to the single agent whose file must change: moat, management, valuation, mos, "
-            "or `report` if only the final report can fix it (e.g. presentation, financial quality section).",
+            "or `report` if only the final report can fix it (e.g. presentation, or anything in business.md: the "
+            "report agent turns it into the Company Overview, Business Model and Financial Quality sections).",
+            "- Also audit compliance with the project data rules above (for example, an idea attributed to Buffett "
+            "without supporting evidence).",
             "- The sidecar `findings` list holds ONLY issues that are open after this review, at every severity. "
             "An issue you verified as fixed is reported as fixed in review.md and left out of the sidecar: the "
-            "workflow sends every HIGH and MEDIUM finding in the sidecar to its owner for correction.",
+            "workflow sends HIGH and MEDIUM findings in the sidecar to their owner for correction (findings owned by "
+            "`report` go to the report agent).",
             "- The workflow counts the findings itself and decides what is corrected; you only audit and classify.",
             "- The LAST line of review.md must be exactly `Summary: H HIGH, M MEDIUM, L LOW` with real numbers: "
             "H, M and L equal the number of sidecar findings of each severity.",
@@ -114,9 +129,12 @@ def system_prompt(root: Path, paths: Paths, agent: str, company: str, iteration:
                             "corrected; it goes to the final report flagged as unresolved.")
     if agent == "report":
         contract.append("- Use exactly the upstream scores given in the task for `scores_reported`; do not average them.")
+        contract.append("- `financial_quality_score` is the score in the business analysis; change it only where an "
+                        "issue owned by the report requires it, and then say in the report why.")
     sections = [
         load_agent_body(root, agent),
         "## Buffett analysis skill (already loaded; follow it)\n" + load_skill_body(root),
+        "## Project data rules (from the project's CLAUDE.md; follow them)\n" + load_data_rules(root),
         "\n".join(contract),
     ]
     if REFERENCES[agent]:
@@ -135,8 +153,9 @@ def user_prompt(paths: Paths, agent: str, company: str, *, findings=(), upstream
                 scores: dict[str, int] | None = None, unresolved=(), report_notes=(), iteration: int = 0,
                 high_iteration: int = 0, medium_iteration: int = 0, phase: str | None = None,
                 previous_findings=()) -> str:
-    parts = [f"Perform your role for the company: {company}.",
-             f"Read your upstream inputs from `research/{paths.key}/` as your instructions describe."]
+    parts = [f"Perform your role for the company: {company}."]
+    if DEPENDS[agent]:
+        parts.append(f"Read your upstream inputs from `research/{paths.key}/` as your instructions describe.")
     if agent in ANALYSTS and (findings or upstream_changed) and iteration:
         round_label = (f"MEDIUM correction round {medium_iteration} of {MAX_MEDIUM_CORRECTIONS}" if phase == "medium"
                        else f"HIGH correction round {high_iteration} of {MAX_CORRECTIONS}")

@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 MAX_CORRECTIONS = 5          # Stage 4 iteration cap, HIGH-severity findings
 MAX_MEDIUM_CORRECTIONS = 2   # Stage 4b iteration cap, MEDIUM-severity findings (runs after HIGH is clear)
+MAX_FINDING_ATTEMPTS = 2     # correction attempts per finding id; one still open after this many is not sent again
 MAX_VALIDATION_RETRIES = 2   # retries per node when output fails validation
 AGENT_TIMEOUT_SECONDS = 45 * 60
 # The SDK's default 1 MB per-message limit is exceeded when an agent fetches a large filing
@@ -24,24 +25,29 @@ ENV_FILE = ROOT / ".env"
 SEC_TIMEOUT_SECONDS = 30
 DATA_PACK_YEARS = 15         # fiscal years of XBRL history in the data pack
 
-RESEARCH_AGENTS = ("moat", "management", "valuation")   # Stage 1 (parallel)
+RESEARCH_AGENTS = ("moat", "management", "valuation")   # Stage 1 analysts; the MOS agent's inputs
+STAGE1_AGENTS = RESEARCH_AGENTS + ("business",)         # Stage 1 (parallel)
 ANALYSTS = RESEARCH_AGENTS + ("mos",)                   # agents that can own a finding
-ALL_AGENTS = ANALYSTS + ("review", "report")
+# `business` drafts the report's Company Overview, Business Model and Financial Quality sections. It is reviewed,
+# but not corrected: findings on it are owned by `report`, as they were when the report agent wrote these sections.
+ALL_AGENTS = RESEARCH_AGENTS + ("business", "mos", "review", "report")
 
 # agent -> agents whose output files it reads (the workflow's dependency graph)
 DEPENDS: dict[str, tuple[str, ...]] = {
     "moat": (),
     "management": (),
     "valuation": (),
+    "business": (),
     "mos": RESEARCH_AGENTS,
-    "review": ANALYSTS,
-    "report": ANALYSTS + ("review",),
+    "review": ANALYSTS + ("business",),
+    "report": ANALYSTS + ("business", "review"),
 }
 
 AGENT_FILE = {
     "moat": "moat-agent",
     "management": "management-agent",
     "valuation": "valuation-agent",
+    "business": "business-agent",
     "mos": "mos-agent",
     "review": "reviewer-agent",
     "report": "report-agent",
@@ -51,12 +57,15 @@ OUTPUT_NAME = {
     "moat": "moat.md",
     "management": "management.md",
     "valuation": "valuation.md",
+    "business": "business.md",
     "mos": "mos.md",
     "review": "review.md",
     "report": "final_investment_report.md",
 }
 
 SOURCE_TAGS = ("FACT", "CALCULATION", "ASSUMPTION", "JUDGMENT")
+
+BUSINESS_HEADINGS = ("Company Overview", "Business Model", "Financial Quality")
 
 REPORT_HEADINGS = (
     "Executive Summary", "Company Overview", "Business Model", "Financial Quality",

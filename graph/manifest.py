@@ -22,16 +22,20 @@ def load(paths: Paths) -> dict:
     return {}
 
 
-def record(paths: Paths, agent: str, inputs: dict[str, str | None], rnd: int = 0, attempts: int = 1) -> None:
+def record(paths: Paths, agent: str, inputs: dict[str, str | None], rnd: int = 0, attempts: int = 1,
+           usage: dict | None = None) -> None:
+    """`usage` is what the run cost, so a resume that skips the agent still accounts for it."""
     m = load(paths)
-    m[agent] = {"output": sha(paths.output(agent)), "inputs": inputs, "round": rnd, "attempts": attempts}
+    m[agent] = {"output": sha(paths.output(agent)), "inputs": inputs, "round": rnd, "attempts": attempts,
+                "usage": usage}
     paths.meta_dir.mkdir(parents=True, exist_ok=True)
     paths.manifest.write_text(json.dumps(m, indent=2), encoding="utf-8")
 
 
 def completed_in_round(paths: Paths, agent: str, rnd: int) -> dict | None:
-    """The manifest record if `agent` already finished correction round `rnd` on the current inputs.
-    Lets a resumed run skip agents that completed before the round's node failed."""
+    """The manifest record if `agent` already finished round `rnd` (0 = before any correction) on the current
+    inputs. Lets a resumed run skip agents that completed before their node failed. A fresh run archives the
+    manifest, so every record is from the current run."""
     rec = load(paths).get(agent)
     current = rec and rec["inputs"] == input_hashes(paths, agent) and rec["output"] == sha(paths.output(agent))
     return rec if current and rec.get("round") == rnd else None

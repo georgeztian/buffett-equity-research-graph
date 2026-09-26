@@ -59,7 +59,7 @@ Collect current and historical data:
     - When forecasting future owner earnings, normalize working-capital swings for highly seasonal businesses. Focus on the long-term average increase in working capital, rather than the absolute level of working capital.
 - Make conservative assumptions based on the company's historical performance (owner earnings growth rate, terminal growth rate, etc.). When uncertain about future owner earnings, use conservative estimates (do not be too optimistic).
 - To estimate terminal values, use two different methods: 1) DCF with conservative/low terminal growth rate (Gordon Growth) and 2) long-run (10-15 years) average P/E ratio (if P/E ratio has been trending lower over the past 10 years, use a lower P/E ratio than the 10-year average).
-- Use long-term Treasury bond yield (e.g. roughly 6%) with a small premium (e.g. 2%) as the discount rate (equals roughly 7%) consistently. Do not set a discount rate outside the range 6%-9% unless the user explicitly approves.
+- Use long-term Treasury bond yield (e.g. roughly 5%) with a small premium (e.g. 2%) as the discount rate (equals roughly 7%) consistently. Do not set a discount rate outside the range 6%-9% unless the user explicitly approves.
 - Conduct sensitivity analysis (Base Case, Optimistic Case, Best Case, Pessimistic Case, Worst Case). For the Base Case, use the more conservative estimate of terminal value between Gordon Growth and long-run average P/E ratio.
 
 ### Presentation of DCF Valuation

@@ -69,11 +69,17 @@ async def run(company: str | None, run_id: str, resume: bool) -> int:
             values = dict(snap.values)
             msg = f"{type(e).__name__}: {e}"
             paused = isinstance(e, UsageLimitReached)
-            if isinstance(e, NodeFailure) and e.agent:   # show the stopped agent, not 'not_run'
-                prior = values.get("status", {}).get(e.agent, {})
-                spent = Usage.accumulate(prior, e.usage.record()) if e.usage else {}
-                values["status"] = {**values.get("status", {}), e.agent: {
-                    **prior, **spent, "state": "paused" if paused else "failed"}}
+            if isinstance(e, NodeFailure):
+                for u in e.completed:   # agents that finished in the failed node
+                    values["status"] = {**values.get("status", {}), **u.get("status", {})}
+                    values["scores"] = {**values.get("scores", {}), **u.get("scores", {})}
+                for f in (e, *e.others):   # show the stopped agents, not 'not_run'
+                    if not f.agent:
+                        continue
+                    prior = values.get("status", {}).get(f.agent, {})
+                    spent = Usage.accumulate(prior, f.usage.record()) if f.usage else {}
+                    values["status"] = {**values.get("status", {}), f.agent: {
+                        **prior, **spent, "state": "paused" if isinstance(f, UsageLimitReached) else "failed"}}
             write_summary(paths, values, error=msg, paused=paused)
             resume_cmd = resume_command(run_id)
             notify(f"Buffett: {values.get('company') or company} - workflow {'PAUSED' if paused else 'FAILED'}",

@@ -14,8 +14,6 @@ inconsistencies before the final investment report is produced.
 
 Use the buffett-analysis skill.
 
-Note: `<KEY>` is the target company's folder key (its ticker, or a slug of its name). All `research/<KEY>/` and `reports/<KEY>/` paths are per company.
-
 Read all relevant files in:
 `research/<KEY>/`
 
@@ -56,11 +54,12 @@ Record every issue that is open after your review, at every severity. You audit 
 - HIGH issues in the analyses (moat, management, valuation, MOS) are sent back for correction first, up to the workflow's HIGH cap of correction rounds.
 - MEDIUM issues in the analyses are sent back only once no such HIGH issue remains, up to the workflow's own, shorter MEDIUM cap.
 - LOW issues are recorded for the record and never corrected.
-- An issue still open when its cap is reached (including every MEDIUM issue when the HIGH cap is reached first) goes to the final report flagged as unresolved.
+- An issue still open after being sent back for correction twice is not sent back again.
+- An issue still open when its cap is reached or that is no longer sent back (including every MEDIUM issue when HIGH issues remain open) goes to the final report flagged as unresolved.
+- Issues in the business analysis (`research/<KEY>/business.md`) are not sent back: they go to the report agent, which builds the report's Company Overview, Business Model and Financial Quality sections from it.
 
 On a re-review, state for each previously reported issue whether it is now fixed, and record only the issues still open.
 
 End the review with a summary line stating the total number of open HIGH, MEDIUM, and LOW issues.
 
 Do not write the final report.
-Do not make any unauthorized git commits.

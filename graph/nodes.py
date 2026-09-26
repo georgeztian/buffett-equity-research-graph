@@ -1,4 +1,4 @@
-"""Graph nodes. Every node = one bounded agent call + deterministic validation."""
+"""Graph nodes. Every agent run = one bounded agent session + deterministic validation."""
 from __future__ import annotations
 
 import asyncio
@@ -11,8 +11,8 @@ from pathlib import Path
 
 from . import contracts, datapack, manifest, prompts, routing, validators
 from .agent_runner import AgentRunner, AgentTask, Usage
-from .config import (AGENT_FILE, ALL_AGENTS, ANALYSTS, DEPENDS, MAX_CORRECTIONS, MAX_MEDIUM_CORRECTIONS,
-                     MAX_VALIDATION_RETRIES, RESEARCH_AGENTS, Paths)
+from .config import (AGENT_FILE, ALL_AGENTS, ANALYSTS, DEPENDS, MAX_CORRECTIONS, MAX_FINDING_ATTEMPTS,
+                     MAX_MEDIUM_CORRECTIONS, MAX_VALIDATION_RETRIES, RESEARCH_AGENTS, STAGE1_AGENTS, Paths)
 from .notify import notify
 from .summary import write_summary
 
@@ -35,6 +35,8 @@ class NodeFailure(RuntimeError):
         super().__init__(message)
         self.agent = agent
         self.usage = usage   # what the failed run spent, so the summary still accounts for it
+        self.completed: list[dict] = []           # updates of sibling agents that finished in the same node
+        self.others: list["NodeFailure"] = []     # sibling agents that also failed in the same node
 
 
 class UsageLimitReached(NodeFailure):
@@ -72,10 +74,11 @@ class Workflow:
             raise NodeFailure(f"{agent}: upstream outputs missing: {missing}", agent)
 
         prior = state.get("status", {}).get(agent, {})
-        done = manifest.completed_in_round(paths, agent, iteration) if iteration else None
-        if done:  # finished earlier in this correction round; the node failed elsewhere, so don't redo it
-            return self._result(agent, paths, prior_runs, done["attempts"], None, iteration,
-                                _event(f"{agent}: already complete for round {iteration}; not re-run"), prior)
+        done = manifest.completed_in_round(paths, agent, iteration)
+        if done:  # finished earlier in this round; its node failed elsewhere, so don't redo it
+            where = f" for round {iteration}" if iteration else ""
+            return self._result(agent, paths, prior_runs, done["attempts"], done.get("usage"), iteration,
+                                _event(f"{agent}: already complete{where}; not re-run"), prior)
 
         sys_prompt = prompts.system_prompt(self.root, paths, agent, state["company"], iteration,
                                            high_iteration=high_iteration, medium_iteration=medium_iteration)
@@ -92,6 +95,7 @@ class Workflow:
         # read and only fixes what was rejected). A session that failed to execute is replaced by a fresh one
         # that gets the full task again. `started` marks the session start: files must be written after it.
         use = Usage()
+        vkw = {"scores": state.get("scores"), "unresolved": ctx.get("unresolved") or []}
         errors, attempts, started = [], 0, time.time()
         async with AsyncExitStack() as stack:
             session = None
@@ -115,8 +119,11 @@ class Workflow:
                 if res.usage_limit:
                     raise UsageLimitReached(f"{agent}: {res.error}", agent, use)
                 if res.ok:
-                    errors = validators.validate(agent, paths, started, scores=state.get("scores"),
-                                                 unresolved=ctx.get("unresolved") or [])
+                    errors = validators.validate(agent, paths, started, **vkw)
+                elif validators.saved_before_error(agent, paths, started, **vkw):
+                    # the turn failed only after the agent had saved complete outputs: keep them, don't redo the task
+                    _log(f"{agent}: {res.error[:120]} - but its saved files are complete and pass validation; kept")
+                    errors = []
                 else:
                     errors = [f"agent execution error: {res.error}"]
                     await session_stack.aclose()   # a broken session is not reused
@@ -127,16 +134,17 @@ class Workflow:
         if errors:
             raise NodeFailure(f"{agent} failed after {attempts} attempts: " + "; ".join(errors), agent, use)
 
-        manifest.record(paths, agent, in_hashes, iteration, attempts)
-        return self._result(agent, paths, prior_runs, attempts, use, iteration,
+        this = use.record()
+        manifest.record(paths, agent, in_hashes, iteration, attempts, this)
+        return self._result(agent, paths, prior_runs, attempts, this, iteration,
                             _event(f"{agent}: complete (run {prior_runs + 1}, {attempts} attempt(s), "
                                    f"{use.describe()})"), prior)
 
     @staticmethod
-    def _result(agent: str, paths: Paths, prior_runs: int, attempts: int, use: "Usage | None",
+    def _result(agent: str, paths: Paths, prior_runs: int, attempts: int, this: dict | None,
                 iteration: int, event: str, prior: dict) -> dict:
         """`cost_usd`, `seconds` and `tokens` describe this run; `total_*` add up every run of the agent."""
-        this = use.record() if use else {"cost_usd": None, "seconds": 0.0, "turns": 0, "tokens": {}}
+        this = this or {"cost_usd": None, "seconds": 0.0, "turns": 0, "tokens": {}}
         update: dict = {
             "status": {agent: {"state": "complete", "runs": prior_runs + 1, "attempts": attempts,
                                "correction_round": iteration, **this,
@@ -157,6 +165,10 @@ class Workflow:
         for ref in sorted({r for refs in prompts.REFERENCES.values() for r in refs}):
             if not (self.root / prompts.SKILL_DIR / "references" / f"{ref}.md").exists():
                 raise NodeFailure(f"missing reference file: {ref}.md")
+        try:
+            prompts.load_data_rules(self.root)
+        except (OSError, ValueError) as e:
+            raise NodeFailure(f"cannot load the project data rules for the agents: {e}")
 
         stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         old = [p for p in (*paths.research_dir.glob("*.md"), *paths.meta_dir.glob("*.json"),
@@ -172,7 +184,7 @@ class Workflow:
                 shutil.move(str(p), dest)
         paths.meta_dir.mkdir(parents=True, exist_ok=True)
         paths.reports_dir.mkdir(parents=True, exist_ok=True)
-        return {"iteration": 0, "high_iteration": 0, "medium_iteration": 0, "findings": [],
+        return {"iteration": 0, "high_iteration": 0, "medium_iteration": 0, "findings": [], "finding_attempts": {},
                 "unresolved_high": [], "unresolved_medium": [],
                 "history": [_event(f"input validated for {state['company']} -> key {state['key']}"
                                    + (f"; archived {len(old)} earlier files" if old else ""))]}
@@ -185,6 +197,24 @@ class Workflow:
         note = await asyncio.to_thread(datapack.build, paths, state["company"])
         return {"data_pack": note, "history": [_event(f"data pack: {note} ({time.time() - t0:.1f}s)")]}
 
+    async def _parallel(self, calls: list) -> list[dict]:
+        """Run agent calls concurrently. Every one is allowed to finish (a completed run persists in the manifest,
+        so a resume skips it) before a failure is surfaced, with the siblings' outcomes attached for the summary."""
+        results = await asyncio.gather(*calls, return_exceptions=True)
+        failures = [r for r in results if isinstance(r, BaseException)]
+        if failures:
+            err = next((f for f in failures if isinstance(f, UsageLimitReached)), failures[0])
+            if isinstance(err, NodeFailure):
+                err.completed += [r for r in results if not isinstance(r, BaseException)]
+                err.others += [f for f in failures if f is not err and isinstance(f, NodeFailure)]
+            raise err
+        return list(results)
+
+    async def research(self, state: dict) -> dict:
+        """Stage 1: the independent agents in parallel. One node rather than one per agent: LangGraph cancels the
+        rest of a step when a node fails, which would throw away the other agents' work in progress."""
+        return _merge(*await self._parallel([self._execute(a, state) for a in STAGE1_AGENTS]))
+
     def agent_node(self, agent: str):
         async def node(state: dict) -> dict:
             return await self._execute(agent, state)
@@ -195,6 +225,14 @@ class Workflow:
         stale = validators.check_fresh_inputs(paths, "review")
         if stale:
             raise NodeFailure(f"review blocked, stale inputs: {stale}", "review")
+        it = state.get("iteration", 0)
+        if it and not manifest.completed_in_round(paths, "review", it) and not manifest.stale_agents(paths, ("review",)):
+            # No file the reviewer reads changed in this round: a re-review could only repeat the last one.
+            rev = contracts.load_review(paths.sidecar("review"))
+            c = rev.counts
+            return {"findings": [f.model_dump() for f in rev.findings],
+                    "history": [_event(f"review: no research file changed in round {it}, so the previous review "
+                                       f"stands ({c.high} HIGH, {c.medium} MEDIUM, {c.low} LOW); not re-run")]}
         prev = [contracts.Finding.model_validate(f) for f in state.get("findings", [])]
         upd = await self._execute("review", state, previous_findings=prev)
         rev = contracts.load_review(paths.sidecar("review"))
@@ -217,31 +255,34 @@ class Workflow:
         paths = self.paths(state)
         total_rnd = state.get("iteration", 0) + 1
         phase_rnd = state.get(round_field, 0) + 1
-        plan = routing.plan_corrections(state["findings"], severity)
+        attempts = dict(state.get("finding_attempts") or {})
+        plan = routing.plan_corrections(state["findings"], severity, attempts)
+        for fs in plan.values():
+            for f in fs:
+                attempts[f.id] = attempts.get(f.id, 0) + 1
         phase = severity.lower()
         rstate = {**state, "iteration": total_rnd, round_field: phase_rnd}
         first = [a for a in RESEARCH_AGENTS if a in plan]
         updates = [{"history": [_event(f"{severity} correction round {phase_rnd} of {max_rounds} "
                                        f"(overall round {total_rnd}): owners={sorted(plan)}")]}]
         if first:
-            # Let every sibling finish (their results persist in the manifest) before surfacing a failure.
-            results = await asyncio.gather(*(
-                self._execute(a, rstate, findings=plan[a], phase=phase) for a in first), return_exceptions=True)
-            failures = [r for r in results if isinstance(r, BaseException)]
-            if failures:
-                raise next((f for f in failures if isinstance(f, UsageLimitReached)), failures[0])
-            updates += results
+            updates += await self._parallel([self._execute(a, rstate, findings=plan[a], phase=phase) for a in first])
         # Downstream refresh comes from content hashes, not from a hand-written rule. A mos that already
         # finished this round (before an interruption) must still be merged into the state.
         if "mos" in plan or manifest.stale_agents(paths, ("mos",)) or manifest.completed_in_round(paths, "mos", total_rnd):
             merged = _merge(*updates)
             mstate = {**rstate, "status": {**state.get("status", {}), **merged["status"]},
                       "scores": {**state.get("scores", {}), **merged["scores"]}}
-            updates.append(await self._execute("mos", mstate, findings=plan.get("mos", ()),
-                                               upstream_changed=bool(first), phase=phase))
+            try:
+                updates.append(await self._execute("mos", mstate, findings=plan.get("mos", ()),
+                                                   upstream_changed=bool(first), phase=phase))
+            except NodeFailure as e:   # the agents corrected before mos still count in the run summary
+                e.completed = updates + e.completed
+                raise
         out = _merge(*updates)
         out["iteration"] = total_rnd
         out[round_field] = phase_rnd
+        out["finding_attempts"] = attempts
         return out
 
     async def correct(self, state: dict) -> dict:
@@ -255,21 +296,24 @@ class Workflow:
         return await self._run_correction_round(state, severity="MEDIUM", round_field="medium_iteration",
                                                  max_rounds=MAX_MEDIUM_CORRECTIONS)
 
-    async def flag_unresolved(self, state: dict) -> dict:
+    def _flag(self, state: dict, severity: str, round_field: str, cap: int) -> tuple[list[dict], str]:
+        """Record the open findings of `severity` as unresolved: the phase's round cap was reached, or every one was
+        already sent back MAX_FINDING_ATTEMPTS times without being fixed. Returns (findings, history event)."""
         paths = self.paths(state)
-        unresolved = [f.model_dump() for f in routing.correctable(state["findings"], "HIGH")]
-        (paths.meta_dir / "unresolved_high.json").write_text(json.dumps(unresolved, indent=2), encoding="utf-8")
-        return {"unresolved_high": unresolved,
-                "history": [_event(f"correction limit ({MAX_CORRECTIONS}) reached; "
-                                   f"{len(unresolved)} HIGH issue(s) flagged unresolved")]}
+        unresolved = [f.model_dump() for f in routing.correctable(state["findings"], severity)]
+        (paths.meta_dir / f"unresolved_{severity.lower()}.json").write_text(json.dumps(unresolved, indent=2),
+                                                                            encoding="utf-8")
+        why = (f"{severity} correction limit ({cap}) reached" if state.get(round_field, 0) >= cap else
+               f"every open {severity} issue was already sent back {MAX_FINDING_ATTEMPTS} times without being fixed")
+        return unresolved, _event(f"{why}; {len(unresolved)} {severity} issue(s) flagged unresolved")
+
+    async def flag_unresolved(self, state: dict) -> dict:
+        unresolved, event = self._flag(state, "HIGH", "high_iteration", MAX_CORRECTIONS)
+        return {"unresolved_high": unresolved, "history": [event]}
 
     async def flag_unresolved_medium(self, state: dict) -> dict:
-        paths = self.paths(state)
-        unresolved = [f.model_dump() for f in routing.correctable(state["findings"], "MEDIUM")]
-        (paths.meta_dir / "unresolved_medium.json").write_text(json.dumps(unresolved, indent=2), encoding="utf-8")
-        return {"unresolved_medium": unresolved,
-                "history": [_event(f"MEDIUM correction limit ({MAX_MEDIUM_CORRECTIONS}) reached; "
-                                   f"{len(unresolved)} MEDIUM issue(s) flagged unresolved")]}
+        unresolved, event = self._flag(state, "MEDIUM", "medium_iteration", MAX_MEDIUM_CORRECTIONS)
+        return {"unresolved_medium": unresolved, "history": [event]}
 
     async def report(self, state: dict) -> dict:
         paths = self.paths(state)
@@ -292,6 +336,7 @@ class Workflow:
 
     async def finalize(self, state: dict) -> dict:
         paths = self.paths(state)
+        state = {**state, "history": state.get("history", []) + ["workflow complete"]}
         summary = write_summary(paths, state)
         print(f"\nBuffett analysis for {state['company']} is {summary['workflow_status']}.")
         print(f"  Correction iterations: {summary['high_correction_iterations']} HIGH, "

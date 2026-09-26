@@ -1,6 +1,6 @@
 """Stage 0: deterministic SEC data pack, shared by every agent in a run.
 
-Pulls the company's annual XBRL facts from SEC EDGAR once, so the three Stage 1 agents, the MOS agent, the
+Pulls the company's annual XBRL facts from SEC EDGAR once, so the Stage 1 agents, the MOS agent, the
 reviewer and the report agent all work from the same primary-source numbers instead of each fetching (and re-deriving) them.
 No model is involved. Values are copied exactly as filed; every row names its XBRL tag (different tags are never
 merged into one row); the few reference calculations show their formulas and inputs. If anything fails, the
@@ -293,7 +293,7 @@ def _unavailable(paths: Paths, company: str, reason: str) -> str:
 
 
 def build(paths: Paths, company: str) -> str:
-    """Write research/<KEY>/_data/financials.md (+ financials.json, raw/). Returns a one-line status note."""
+    """Write research/<KEY>/_data/financials.md (+ financials.json). Returns a one-line status note."""
     try:
         return _build(paths, company)
     except Exception as e:   # this stage must never fail the workflow
@@ -316,15 +316,15 @@ def _build(paths: Paths, company: str) -> str:
     tickers = _get_json(TICKERS_URL, ua)
     found = resolve_cik(company, paths.key, tickers)
     if not found:
+        hint = ("; if it is a ticker, give it in upper case or as \"Company Name (TICKER)\""
+                if paths.key.islower() and "-" not in paths.key else "")
         return _unavailable(paths, company, "company not found in the SEC ticker list (not an SEC registrant, "
-                                            "or the name/ticker did not match exactly)")
+                                            f"or the name/ticker did not match exactly){hint}")
     cik, ticker = found
     facts = _get_json(FACTS_URL.format(cik=cik), ua)
     subs = _get_json(SUBMISSIONS_URL.format(cik=cik), ua)
-    raw = paths.data_dir / "raw"
-    raw.mkdir(parents=True, exist_ok=True)
-    (raw / "companyfacts.json").write_text(json.dumps(facts), encoding="utf-8")   # unmodified, for audit
-    (raw / "submissions.json").write_text(json.dumps(subs), encoding="utf-8")
+    # The raw API responses are not kept (several MB per run, moved into _archive by every later run): every value
+    # used is in financials.json with its accession number, and the responses can be fetched again from SEC.
 
     gaap = facts.get("facts", {}).get("us-gaap", {})
     ends = fiscal_year_ends(gaap)

@@ -10,9 +10,10 @@ import re
 from pydantic import ValidationError
 
 from . import contracts, manifest
-from .config import ANALYSTS, DEPENDS, REPORT_HEADINGS, SOURCE_TAGS, Paths
+from .config import ANALYSTS, BUSINESS_HEADINGS, DEPENDS, REPORT_HEADINGS, SOURCE_TAGS, Paths
 
-MIN_CHARS = {"moat": 2500, "management": 2500, "valuation": 3000, "mos": 1500, "review": 1500, "report": 6000}
+MIN_CHARS = {"moat": 2500, "management": 2500, "valuation": 3000, "business": 3000, "mos": 1500, "review": 1500,
+             "report": 6000}
 FRESHNESS_SLACK = 2.0  # seconds; filesystem mtime granularity
 
 
@@ -42,13 +43,15 @@ def validate(agent: str, paths: Paths, started: float, scores: dict[str, int] | 
         errs.append(f"{paths.rel(side)} was not updated by this run (stale file)")
 
     try:
-        if agent in ANALYSTS:
+        if agent in ANALYSTS or agent == "business":
             contracts.load_score(side)
             found = [t for t in SOURCE_TAGS if re.search(rf"\b{t}\b", text)]
             if len(found) < 2:
                 errs.append(f"output must label statements with {SOURCE_TAGS}; found only {found}")
             if not re.search(r"score", text, re.IGNORECASE):
                 errs.append("output does not state the required 1-10 score")
+            if agent == "business":
+                errs += [f"missing section: '{h}'" for h in BUSINESS_HEADINGS if not _has_heading(text, h)]
         elif agent == "review":
             errs += _check_review(text, contracts.load_review(side))
         elif agent == "report":
@@ -60,16 +63,17 @@ def validate(agent: str, paths: Paths, started: float, scores: dict[str, int] | 
 
 def _check_review(text: str, rev: contracts.ReviewSidecar) -> list[str]:
     errs = []
-    summ = contracts.parse_summary_line(text)
+    lines = text.strip().splitlines()
+    summ = contracts.parse_summary_line(lines[-1]) if lines else None
     if summ is None:
-        errs.append("review.md must end with the line 'Summary: H HIGH, M MEDIUM, L LOW'")
+        errs.append("the last line of review.md must be 'Summary: H HIGH, M MEDIUM, L LOW'")
     else:
         c = rev.counts
         if summ != (c.high, c.medium, c.low):
             errs.append(f"summary line counts {summ} disagree with the sidecar findings, which contain "
                         f"{c.high} HIGH, {c.medium} MEDIUM, {c.low} LOW")
     for f in rev.findings:
-        if f.id not in text:
+        if not re.search(rf"(?<![A-Za-z0-9]){re.escape(f.id)}(?![A-Za-z0-9])", text):
             errs.append(f"finding id {f.id!r} from sidecar does not appear in review.md")
     return errs
 
@@ -83,6 +87,15 @@ def _check_report(text: str, rep: contracts.ReportSidecar, scores: dict[str, int
     if unresolved and not re.search(r"unresolved", text, re.IGNORECASE):
         errs.append("report must flag the unresolved HIGH- and/or MEDIUM-severity issues")
     return errs
+
+
+def saved_before_error(agent: str, paths: Paths, started: float, **kw) -> bool:
+    """After a failed turn (timeout, transport error): True if the agent had already saved complete, valid outputs.
+    The sidecar is written after the main file, so it must be the newer of the two (else the agent may have been
+    still editing the main file when it stopped)."""
+    side, out = paths.sidecar(agent), paths.output(agent)
+    return (side.exists() and out.exists() and side.stat().st_mtime >= out.stat().st_mtime
+            and not validate(agent, paths, started, **kw))
 
 
 def check_fresh_inputs(paths: Paths, agent: str) -> list[str]:

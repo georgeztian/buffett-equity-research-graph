@@ -8,7 +8,7 @@ from .config import ALL_AGENTS, Paths, resume_command
 
 
 def usage_totals(agents: dict[str, dict]) -> dict:
-    """Whole-run totals over every run of every agent (Phase 0 measurement: cost, time, tokens)."""
+    """Whole-run totals over every run of every agent (cost, time, tokens)."""
     tokens: dict[str, int] = {}
     for rec in agents.values():
         for k, v in (rec.get("total_tokens") or {}).items():

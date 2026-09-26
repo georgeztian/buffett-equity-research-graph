@@ -19,6 +19,7 @@ class GraphState(TypedDict, total=False):
     high_iteration: int                               # HIGH-severity correction rounds completed (cap: MAX_CORRECTIONS)
     medium_iteration: int                             # MEDIUM-severity correction rounds completed (cap: MAX_MEDIUM_CORRECTIONS)
     findings: list[dict[str, Any]]                   # findings from the latest review
+    finding_attempts: dict[str, int]                 # finding id -> correction rounds it was sent to its owner in
     unresolved_high: list[dict[str, Any]]            # set only by the HIGH fallback path
     unresolved_medium: list[dict[str, Any]]          # set by the MEDIUM fallback path, and recomputed
                                                       # (authoritatively) by report() to cover the case where the

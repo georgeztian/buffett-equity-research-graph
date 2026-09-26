@@ -6,7 +6,7 @@ from pathlib import Path
 from langgraph.graph import END, START, StateGraph
 
 from .agent_runner import AgentRunner
-from .config import RESEARCH_AGENTS, ROOT
+from .config import ROOT
 from .nodes import Workflow
 from .routing import route_after_review
 from .state import GraphState
@@ -18,8 +18,7 @@ def build_graph(runner: AgentRunner, root: Path = ROOT, checkpointer=None):
 
     g.add_node("validate_input", wf.validate_input)
     g.add_node("data_pack", wf.data_pack)          # Stage 0 (deterministic SEC data, shared by all agents)
-    for a in RESEARCH_AGENTS:                      # Stage 1 (parallel fan-out)
-        g.add_node(a, wf.agent_node(a))
+    g.add_node("research", wf.research)            # Stage 1 (moat, management, valuation, business in parallel)
     g.add_node("mos", wf.agent_node("mos"))        # Stage 2
     g.add_node("review", wf.review)                # Stage 3
     g.add_node("correct", wf.correct)              # Stage 4  (HIGH, cap MAX_CORRECTIONS)
@@ -31,9 +30,8 @@ def build_graph(runner: AgentRunner, root: Path = ROOT, checkpointer=None):
 
     g.add_edge(START, "validate_input")
     g.add_edge("validate_input", "data_pack")
-    for a in RESEARCH_AGENTS:
-        g.add_edge("data_pack", a)
-    g.add_edge(list(RESEARCH_AGENTS), "mos")       # join: waits for all three
+    g.add_edge("data_pack", "research")
+    g.add_edge("research", "mos")
     g.add_edge("mos", "review")
     # HIGH is checked first; MEDIUM is only ever considered once no correctable HIGH finding remains, and
     # the two loops share the same "review" node (it re-audits every severity on every pass).

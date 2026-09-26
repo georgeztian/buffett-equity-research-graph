@@ -1,4 +1,6 @@
-"""python -m graph --company "American Express (AXP)" [--detach] | --resume RUN_ID | --print-graph"""
+"""python -m graph --company "American Express (AXP)" [--detach] | --resume RUN_ID | --print-graph
+                  | --set-sec-contact "Your Name you@yourdomain.com"
+"""
 from __future__ import annotations
 
 import argparse
@@ -11,8 +13,8 @@ from pathlib import Path
 
 from .agent_runner import SdkRunner, Usage
 from .build_graph import build_graph
-from .config import (ROOT, Paths, checkpoint_db_path, company_key, key_of, log_path, resume_command,
-                     validate_run_id)
+from .config import (ROOT, SEC_SETUP_HELP, Paths, checkpoint_db_path, company_key, key_of, log_path,
+                     resume_command, save_sec_user_agent, sec_contact, validate_run_id)
 from .nodes import NodeFailure, UsageLimitReached
 from .notify import notify
 from .summary import write_summary
@@ -105,6 +107,36 @@ def detach(run_id: str, child_args: list[str]) -> int:
     return 0
 
 
+def set_sec_contact(value: str) -> bool:
+    """Save the user's SEC contact to .env; False (with the reason printed) if it is not valid."""
+    try:
+        v = save_sec_user_agent(value)
+    except ValueError as e:
+        print(f"Not saved: {e}\n{SEC_SETUP_HELP}", file=sys.stderr)
+        return False
+    print(f"Saved SEC_USER_AGENT={v} to .env (gitignored).")
+    if os.environ.get("SEC_USER_AGENT"):
+        print("Note: the SEC_USER_AGENT environment variable is also set and takes precedence over .env.")
+    return True
+
+
+def ensure_sec_contact() -> bool:
+    """Setup prerequisite for a new run: this user's own SEC contact (Stage 0 needs it). Asks for it when run
+    from a terminal; otherwise prints how to set it. An invalid environment variable is never overridden."""
+    ua, problem = sec_contact()
+    if ua:
+        return True
+    if not os.environ.get("SEC_USER_AGENT") and sys.stdin.isatty():
+        print("One-time setup: SEC EDGAR requires your name and a contact email. They are saved only in this\n"
+              "project's .env file (gitignored) and sent only to SEC.")
+        try:
+            return set_sec_contact(f"{input('Your name: ').strip()} {input('Your contact email: ').strip()}")
+        except EOFError:   # no one to answer (on Windows a NUL stdin still reports itself as a terminal)
+            print()
+    print(f"{problem}.\n{SEC_SETUP_HELP}", file=sys.stderr)
+    return False
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m graph", description="Deterministic Buffett analysis graph")
     ap.add_argument("--company", help='"Company Name", "TICKER" or "Company Name (TICKER)"')
@@ -113,7 +145,12 @@ def main(argv: list[str] | None = None) -> int:
                     help="run in the background, logging to .state/logs/<RUN_ID>.log inside the project")
     ap.add_argument("--run-id", help=argparse.SUPPRESS)   # internal: lets --detach fix the id up front
     ap.add_argument("--print-graph", action="store_true", help="print the graph as a Mermaid diagram and exit")
+    ap.add_argument("--set-sec-contact", metavar='"NAME EMAIL"',
+                    help="save your name and contact email for SEC EDGAR requests to the project .env, and exit")
     a = ap.parse_args(argv)
+
+    if a.set_sec_contact is not None:
+        return 0 if set_sec_contact(a.set_sec_contact) else 2
 
     if a.print_graph:
         print(build_graph(SdkRunner(), ROOT).get_graph().draw_mermaid())
@@ -130,6 +167,8 @@ def main(argv: list[str] | None = None) -> int:
             child = ["--company", a.company, "--run-id", run_id]
     except ValueError as e:   # bad run id (e.g. path traversal) or company with no usable folder key
         print(e, file=sys.stderr)
+        return 2
+    if not resume and not ensure_sec_contact():
         return 2
     if a.detach:
         return detach(run_id, child)

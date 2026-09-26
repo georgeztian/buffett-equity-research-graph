@@ -1,6 +1,7 @@
-"""Static workflow definition: agents, dependencies, limits, and per-company paths."""
+"""Static workflow definition: agents, dependencies, limits, per-company paths, and the user's SEC contact."""
 from __future__ import annotations
 
+import os
 import re
 import sys
 from dataclasses import dataclass
@@ -15,8 +16,10 @@ AGENT_TIMEOUT_SECONDS = 45 * 60
 # The SDK's default 1 MB per-message limit is exceeded when an agent fetches a large filing
 # (e.g. a 10-K page), which kills the attempt with "JSON message exceeded maximum buffer size".
 AGENT_MAX_BUFFER_BYTES = 100 * 1024 * 1024
-# SEC EDGAR asks automated clients to identify themselves; override with the SEC_USER_AGENT env var.
-SEC_USER_AGENT = "buffett-equity-research-graph/1.0 (local research tool)"
+# SEC EDGAR requires automated clients to identify themselves with a name and a contact email, and answers
+# 403 Forbidden otherwise. Each user supplies their own, in the SEC_USER_AGENT env var or the gitignored
+# project .env file; there is deliberately no built-in default. See sec_contact().
+ENV_FILE = ROOT / ".env"
 SEC_TIMEOUT_SECONDS = 30
 DATA_PACK_YEARS = 15         # fiscal years of XBRL history in the data pack
 
@@ -66,6 +69,70 @@ def ensure_inside(root: Path, path: Path) -> Path:
     if not path.resolve().is_relative_to(root.resolve()):
         raise ValueError(f"refusing to use a path outside the project folder: {path}")
     return path
+
+
+_EMAIL = re.compile(r"[^\s@<>]+@[^\s@<>]+\.[A-Za-z]{2,}")
+# Placeholder domains (.env.example and the help text use them), never a real user's contact.
+_PLACEHOLDER_DOMAINS = ("example.com", "example.org", "example.net", "domain.com", "yourdomain.com")
+
+SEC_SETUP_HELP = (
+    "SEC EDGAR requires every user to identify themselves with a name and a contact email (it answers\n"
+    "403 Forbidden otherwise). Set yours once for this project; it is saved in the gitignored .env file:\n"
+    '  python -m graph --set-sec-contact "Your Name you@yourdomain.com"\n'
+    "(or set the SEC_USER_AGENT environment variable, which takes precedence over .env)."
+)
+
+
+def check_sec_user_agent(value: str) -> str:
+    """The cleaned User-Agent if it has a name and a real-looking contact email, else raise ValueError."""
+    v = " ".join(value.strip().strip("\"'").split())
+    m = _EMAIL.search(v)
+    if not m:
+        raise ValueError(f"no contact email in {v!r}")
+    if not v.replace(m.group(0), "").strip(" <>()"):
+        raise ValueError(f"no name next to the email in {v!r}")
+    if m.group(0).lower().rsplit("@", 1)[1] in _PLACEHOLDER_DOMAINS:
+        raise ValueError(f"{v!r} is a placeholder; use your own name and email")
+    return v
+
+
+def _env_key(line: str) -> str | None:
+    """The variable name on a `NAME=value` (or `export NAME=value`) line of .env, else None."""
+    k, sep, _ = line.strip().partition("=")
+    return k.strip().removeprefix("export ").strip() if sep else None
+
+
+def _read_env_file(name: str) -> str | None:
+    try:
+        lines = ENV_FILE.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+    return next((l.partition("=")[2].strip().strip("\"'") for l in lines if _env_key(l) == name), None)
+
+
+def sec_contact() -> tuple[str | None, str]:
+    """(User-Agent, "") for this user's SEC contact: SEC_USER_AGENT from the environment, else from the project
+    .env file. (None, why) if it is missing or not a valid name + contact email."""
+    env = os.environ.get("SEC_USER_AGENT")
+    raw, where = (env, "the SEC_USER_AGENT environment variable") if env else (_read_env_file("SEC_USER_AGENT"), ".env")
+    if not raw:
+        return None, "SEC contact not set"
+    try:
+        return check_sec_user_agent(raw), ""
+    except ValueError as e:
+        return None, f"invalid SEC contact in {where}: {e}"
+
+
+def save_sec_user_agent(value: str) -> str:
+    """Validate and write SEC_USER_AGENT into the project .env, keeping any other lines. Returns the value."""
+    v = check_sec_user_agent(value)
+    try:
+        lines = ENV_FILE.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        lines = []
+    kept = [l for l in lines if _env_key(l) != "SEC_USER_AGENT"]
+    ENV_FILE.write_text("\n".join(kept + [f"SEC_USER_AGENT={v}"]) + "\n", encoding="utf-8")
+    return v
 
 
 STATE_DIR = ROOT / ".state"   # runtime state (checkpoints, detached-run logs); gitignored and Dropbox-ignored

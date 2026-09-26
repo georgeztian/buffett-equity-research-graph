@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import AsyncContextManager, AsyncIterator, Protocol
 
-from .config import AGENT_MAX_BUFFER_BYTES, AGENT_TIMEOUT_SECONDS, ensure_inside
+from .config import AGENT_MAX_BUFFER_BYTES, AGENT_TIMEOUT_SECONDS, ENV_FILE, ensure_inside
 
 READ_TOOLS = ["Read", "Glob", "Grep", "WebSearch", "WebFetch"]
 WRITE_TOOLS = ["Write", "Edit"]
@@ -159,6 +159,8 @@ class SdkRunner:
         allowed = {ensure_inside(task.cwd, p).resolve() for p in task.allowed_writes}
 
         async def guard(tool: str, tool_input: dict, _ctx):
+            if tool == "Read" and (task.cwd / tool_input.get("file_path", "")).resolve() == ENV_FILE.resolve():
+                return PermissionResultDeny(message="the user's private settings file is not readable")
             if tool in READ_TOOLS:
                 return PermissionResultAllow()
             if tool in WRITE_TOOLS:

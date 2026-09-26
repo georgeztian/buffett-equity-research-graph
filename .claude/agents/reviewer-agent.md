@@ -53,7 +53,7 @@ Save your review to:
 
 A HIGH issue must be corrected before the final report (unless the maximum number of HIGH-severity correction iterations defined in the workflow has been reached; then list it as unresolved).
 
-A MEDIUM issue is also corrected before the final report, within its own, shorter cap of correction iterations (defined in the workflow) — but only once every HIGH issue is resolved. If the HIGH cap is reached with HIGH issues still unresolved, the workflow goes straight to the final report without attempting any MEDIUM correction; in that case list any open MEDIUM issue too, but only as a note for the report, not as something you corrected. If a MEDIUM issue is still open once its own cap is reached (after HIGH was fully resolved), list it as unresolved. LOW issues are recorded for the record but are never required to be corrected.
+A MEDIUM issue is also corrected before the final report, within its own, shorter cap of correction iterations (defined in the workflow) — but only once every HIGH issue in the analyses (moat, management, valuation, MOS) is resolved. If the HIGH cap is reached with HIGH issues still unresolved, the workflow goes straight to the final report without attempting any MEDIUM correction; in that case list any open MEDIUM issue too, but only as a note for the report, not as something you corrected. If a MEDIUM issue is still open once its own cap is reached (after HIGH was fully resolved), list it as unresolved. LOW issues are recorded for the record but are never required to be corrected.
 
 End the review with a summary line stating the total number of HIGH, MEDIUM, and LOW issues, and the number of HIGH issues still unresolved.
 

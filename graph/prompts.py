@@ -158,7 +158,7 @@ def user_prompt(paths: Paths, agent: str, company: str, *, findings=(), upstream
     if agent == "report":
         parts.append("\nUpstream scores (use exactly): " + json.dumps(scores or {}))
         if unresolved:
-            parts.append("\n## UNRESOLVED ISSUES (correction limit reached)\n"
+            parts.append("\n## UNRESOLVED ISSUES (left open by the correction loop)\n"
                          "Use your best judgment to resolve each, and clearly flag every one as an unresolved "
                          "issue in the report, labeled with its severity (each item below states HIGH or MEDIUM):\n"
                          + _fmt_findings(unresolved))

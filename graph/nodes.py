@@ -154,8 +154,8 @@ class Workflow:
             f = self.root / ".claude" / "agents" / f"{AGENT_FILE[a]}.md"
             if not f.exists():
                 raise NodeFailure(f"missing agent definition: {f}")
-        for ref in ("economic_moat", "management_quality", "margin_of_safety", "valuation"):
-            if not (self.root / ".claude/skills/buffett-analysis/references" / f"{ref}.md").exists():
+        for ref in sorted({r for refs in prompts.REFERENCES.values() for r in refs}):
+            if not (self.root / prompts.SKILL_DIR / "references" / f"{ref}.md").exists():
                 raise NodeFailure(f"missing reference file: {ref}.md")
 
         stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -206,8 +206,7 @@ class Workflow:
                                      f"{rev.counts.low} LOW"))
         return upd
 
-    async def _run_correction_round(self, state: dict, *, severity: str, plan_fn, round_field: str,
-                                    max_rounds: int, phase: str) -> dict:
+    async def _run_correction_round(self, state: dict, *, severity: str, round_field: str, max_rounds: int) -> dict:
         """One correction round acting only on findings of `severity`. Shared by `correct` (HIGH, cap
         MAX_CORRECTIONS) and `correct_medium` (MEDIUM, cap MAX_MEDIUM_CORRECTIONS). `iteration` is the
         single monotonic round id shared by both phases (kept unique across the whole correction stage,
@@ -218,7 +217,8 @@ class Workflow:
         paths = self.paths(state)
         total_rnd = state.get("iteration", 0) + 1
         phase_rnd = state.get(round_field, 0) + 1
-        plan = plan_fn(state["findings"])
+        plan = routing.plan_corrections(state["findings"], severity)
+        phase = severity.lower()
         rstate = {**state, "iteration": total_rnd, round_field: phase_rnd}
         first = [a for a in RESEARCH_AGENTS if a in plan]
         updates = [{"history": [_event(f"{severity} correction round {phase_rnd} of {max_rounds} "
@@ -245,22 +245,19 @@ class Workflow:
         return out
 
     async def correct(self, state: dict) -> dict:
-        """HIGH-severity correction round. Cap: MAX_CORRECTIONS (5). Unchanged behavior from before the
-        MEDIUM loop was added: same plan, same fan-out/mos-refresh logic, same cap."""
-        return await self._run_correction_round(state, severity="HIGH", plan_fn=routing.plan_corrections,
-                                                 round_field="high_iteration", max_rounds=MAX_CORRECTIONS,
-                                                 phase="high")
+        """HIGH-severity correction round. Cap: MAX_CORRECTIONS."""
+        return await self._run_correction_round(state, severity="HIGH", round_field="high_iteration",
+                                                 max_rounds=MAX_CORRECTIONS)
 
     async def correct_medium(self, state: dict) -> dict:
-        """MEDIUM-severity correction round. Cap: MAX_MEDIUM_CORRECTIONS (2). Only reached once no
+        """MEDIUM-severity correction round. Cap: MAX_MEDIUM_CORRECTIONS. Only reached once no
         correctable HIGH finding remains (see routing.route_after_review)."""
-        return await self._run_correction_round(state, severity="MEDIUM", plan_fn=routing.plan_corrections_medium,
-                                                 round_field="medium_iteration", max_rounds=MAX_MEDIUM_CORRECTIONS,
-                                                 phase="medium")
+        return await self._run_correction_round(state, severity="MEDIUM", round_field="medium_iteration",
+                                                 max_rounds=MAX_MEDIUM_CORRECTIONS)
 
     async def flag_unresolved(self, state: dict) -> dict:
         paths = self.paths(state)
-        unresolved = [f.model_dump() for f in routing.correctable_high(state["findings"])]
+        unresolved = [f.model_dump() for f in routing.correctable(state["findings"], "HIGH")]
         (paths.meta_dir / "unresolved_high.json").write_text(json.dumps(unresolved, indent=2), encoding="utf-8")
         return {"unresolved_high": unresolved,
                 "history": [_event(f"correction limit ({MAX_CORRECTIONS}) reached; "
@@ -268,7 +265,7 @@ class Workflow:
 
     async def flag_unresolved_medium(self, state: dict) -> dict:
         paths = self.paths(state)
-        unresolved = [f.model_dump() for f in routing.correctable_medium(state["findings"])]
+        unresolved = [f.model_dump() for f in routing.correctable(state["findings"], "MEDIUM")]
         (paths.meta_dir / "unresolved_medium.json").write_text(json.dumps(unresolved, indent=2), encoding="utf-8")
         return {"unresolved_medium": unresolved,
                 "history": [_event(f"MEDIUM correction limit ({MAX_MEDIUM_CORRECTIONS}) reached; "
@@ -286,9 +283,9 @@ class Workflow:
         # correctable HIGH finding still present after flag_unresolved has already populated
         # unresolved_high, since route_after_review never falls through to report or correct_medium while
         # one remains.)
-        unresolved_medium = [f.model_dump() for f in routing.correctable_medium(state.get("findings", []))]
+        unresolved_medium = [f.model_dump() for f in routing.correctable(state.get("findings", []), "MEDIUM")]
         unresolved = [contracts.Finding.model_validate(f) for f in state.get("unresolved_high", []) + unresolved_medium]
-        notes = routing.report_owned_high(state.get("findings", [])) + routing.report_owned_medium(state.get("findings", []))
+        notes = [f for sev in ("HIGH", "MEDIUM") for f in routing.report_owned(state.get("findings", []), sev)]
         upd = await self._execute("report", state, unresolved=unresolved, report_notes=notes)
         upd["unresolved_medium"] = unresolved_medium  # authoritative as of report time, for run_summary.json
         return upd

@@ -11,6 +11,16 @@ Your job is to execute the complete Buffett analysis workflow for a target compa
 
 The workflow is a deterministic LangGraph implemented in `graph/`. Do NOT orchestrate the agents yourself or spawn the sub-agents manually; the graph owns all sequencing, parallelism, validation, the correction loop, and the final summary. The workflow definition lives only in code: `graph/config.py` (agents and dependencies), `graph/build_graph.py` (stages and edges), `graph/routing.py` (correction-loop rules).
 
+## Prerequisite: the user's own SEC contact
+
+Stage 0 calls SEC EDGAR, which requires each user to identify themselves with a name and contact email. A new run checks this first. If it exits immediately with code 2 and says `SEC contact not set` or `invalid SEC contact in .env`, ask the user for their name and contact email (explain it is saved only in the project's gitignored `.env` and sent only to SEC), save it, and start the run again:
+
+```
+.venv/Scripts/python -m graph --set-sec-contact "<their name> <their email>"
+```
+
+If it says `invalid SEC contact in the SEC_USER_AGENT environment variable`, the user must fix or remove that variable themselves (it takes precedence over `.env`). Use only what the user gives you: never invent a contact, reuse one from elsewhere, or fill in a placeholder. If the log's `data pack:` line says `unavailable (SEC refused the request (HTTP 403 ...`, tell the user the run continued without the data pack and that they should check their SEC contact (or VPN) before the next run.
+
 ## How to run
 
 Follow the hard rule in `CLAUDE.md`: nothing outside the project folder, so no temp folders, scratchpads or background-task output files. A full run takes many minutes, so start it detached; the log stays inside the project:
@@ -37,6 +47,6 @@ The log holds timestamped progress lines (agent started / rejected / complete, r
 
 ## When the run ends
 
-Read `reports/<KEY>/run_summary.md` and report to the user: workflow status, the execution status of every agent, the number of HIGH- and MEDIUM-severity correction iterations performed (separate caps: HIGH up to 5, MEDIUM up to 2 — MEDIUM is only ever attempted once every HIGH issue has actually been resolved; if HIGH still has an open issue when its own cap is reached, the run goes straight to the report with no MEDIUM correction attempted at all), any unresolved HIGH- or MEDIUM-severity issues, and the path of the final report. If the status is FAILED, report the error and offer to resume. If it is PAUSED (Claude usage limit reached, exit code 75), tell the user the run stopped safely, quote the reset time from the error, and give them the `--resume <RUN_ID>` command to run after the reset. Do not resume before the limit resets.
+Read `reports/<KEY>/run_summary.md` and report to the user: workflow status, the execution status of every agent, the number of HIGH- and MEDIUM-severity correction iterations performed (separate caps: HIGH up to 5, MEDIUM up to 2 — MEDIUM is only ever attempted once every HIGH issue in the analyses has actually been resolved; if HIGH still has an open issue when its own cap is reached, the run goes straight to the report with no MEDIUM correction attempted at all), any unresolved HIGH- or MEDIUM-severity issues, and the path of the final report. If the status is FAILED, report the error and offer to resume. If it is PAUSED (Claude usage limit reached, exit code 75), tell the user the run stopped safely, quote the reset time from the error, and give them the `--resume <RUN_ID>` command to run after the reset. Do not resume before the limit resets.
 
 Follow all execution rules and data rules specified in `CLAUDE.md`. Do not edit the research or report files by hand.

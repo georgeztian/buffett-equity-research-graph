@@ -10,7 +10,7 @@ A multi-agent research workflow for Claude Code that analyzes a publicly traded 
 
 A deterministic data step (Stage 0) is followed by five agent stages, and no agent starts until the analyses it depends on are complete.
 
-0. **SEC data pack:** before the agents start, the graph pulls the company's annual XBRL financials from SEC EDGAR once and writes `research/<KEY>/_data/financials.md`: values exactly as filed with their filing references, plus a few reference calculations with their formulas. Every agent reads the same numbers instead of each fetching and re-deriving them. If the company is not an SEC filer with US-GAAP XBRL data, the pack says so and the agents research as before. Set `SEC_USER_AGENT` to change the User-Agent sent to SEC.
+0. **SEC data pack:** before the agents start, the graph pulls the company's annual XBRL financials from SEC EDGAR once and writes `research/<KEY>/_data/financials.md`: values exactly as filed with their filing references, plus a few reference calculations with their formulas. Every agent reads the same numbers instead of each fetching and re-deriving them. If the company is not an SEC filer with US-GAAP XBRL data, the pack says so and the agents research as before. SEC requires each user to identify themselves with a name and contact email; see the setup below.
 1. **Research (in parallel):** the moat, management, and valuation agents each analyze one aspect of the company.
 2. **Margin of safety:** the MOS agent compares the current price with the estimated intrinsic value, using the Stage 1 results.
 3. **Independent review:** a reviewer agent audits all research and rates every problem HIGH, MEDIUM, or LOW.
@@ -36,6 +36,7 @@ research/<KEY>/  Intermediate analyses and the review, per company (gitignored);
 reports/<KEY>/   Final investment report and run summary, per company (gitignored)
 .state/          Checkpoint database and detached-run logs (gitignored)
 requirements.txt Python dependencies
+.env.example     Template for your own SEC contact; the real .env is per user and gitignored
 CLAUDE.md        Project rules for Claude
 LICENSE          MIT license
 ```
@@ -48,7 +49,10 @@ One-time setup, with Python 3.11 or newer (on macOS/Linux, use `.venv/bin/python
 ```
 python -m venv .venv
 .venv/Scripts/python -m pip install --no-cache-dir -r requirements.txt
+.venv/Scripts/python -m graph --set-sec-contact "Your Name you@yourdomain.com"
 ```
+
+The last line is required: SEC EDGAR asks every automated client to identify itself with a name and contact email in the User-Agent header, and answers `403 Forbidden` otherwise. Use your own name and email. They are saved only in this project's `.env` file, which is gitignored (so it is never committed or shared), and are sent only to SEC. You can also copy `.env.example` to `.env` and edit it, or set the `SEC_USER_AGENT` environment variable, which takes precedence over `.env`. A new run will not start until this is set; when started from a terminal, it asks for your name and email the first time.
 
 In Claude Code, from this project, run:
 
@@ -63,6 +67,7 @@ or directly:
 .venv/Scripts/python -m graph --company "Company Name (Ticker)" --detach   # run in the background; log in .state/logs/
 .venv/Scripts/python -m graph --resume <RUN_ID>                            # resume a failed/interrupted/paused run
 .venv/Scripts/python -m graph --print-graph                                # Mermaid diagram of the graph
+.venv/Scripts/python -m graph --set-sec-contact "Your Name you@yourdomain.com"   # save your SEC contact to .env
 ```
 
 The project's `.claude/settings.json` pre-approves `python -m graph …` and the requirements install, so `/run-buffett-analysis` does not prompt for each one. The company can be given as a company name, a ticker, or both. If `claude` is not on PATH, the runner falls back to the binary bundled with the VS Code extension; set `CLAUDE_CLI_PATH` to override.

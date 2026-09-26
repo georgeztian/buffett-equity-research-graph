@@ -43,7 +43,6 @@ def build_summary(paths: Paths, state: dict, error: str | None = None, paused: b
         "error": error,
         "agents": agents,
         "usage": usage_totals(agents),
-        "correction_iterations": state.get("high_iteration", 0),         # kept: HIGH rounds, as before this field existed
         "high_correction_iterations": state.get("high_iteration", 0),
         "medium_correction_iterations": state.get("medium_iteration", 0),
         "total_correction_iterations": state.get("iteration", 0),

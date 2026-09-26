@@ -10,14 +10,13 @@ from __future__ import annotations
 
 import gzip
 import json
-import os
 import re
 import time
 import urllib.error
 import urllib.request
 from datetime import date, datetime
 
-from .config import DATA_PACK_YEARS, SEC_TIMEOUT_SECONDS, SEC_USER_AGENT, Paths
+from .config import DATA_PACK_YEARS, SEC_TIMEOUT_SECONDS, Paths, sec_contact
 
 TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
 FACTS_URL = "https://data.sec.gov/api/xbrl/companyfacts/CIK{cik:010d}.json"
@@ -77,8 +76,7 @@ ITEMS: dict[str, list[tuple[str, str, str, tuple[str, ...]]]] = {
 
 
 # ---------------------------------------------------------------------------------------------------- fetching
-def _get_json(url: str) -> dict:
-    ua = os.environ.get("SEC_USER_AGENT") or SEC_USER_AGENT
+def _get_json(url: str, ua: str) -> dict:
     req = urllib.request.Request(url, headers={"User-Agent": ua, "Accept-Encoding": "gzip"})
     for attempt in range(3):
         try:
@@ -289,7 +287,7 @@ def _unavailable(paths: Paths, company: str, reason: str) -> str:
     paths.data_dir.mkdir(parents=True, exist_ok=True)
     paths.data_pack.write_text(
         f"# SEC data pack: {company}\n\nUNAVAILABLE: {reason}\n\n"
-        "No SEC XBRL data could be prepared for this company. Research all figures as usual from primary sources.\n",
+        "No SEC XBRL data could be prepared for this run. Research all figures as usual from primary sources.\n",
         encoding="utf-8")
     return f"unavailable ({reason})"
 
@@ -299,21 +297,30 @@ def build(paths: Paths, company: str) -> str:
     try:
         return _build(paths, company)
     except Exception as e:   # this stage must never fail the workflow
+        if isinstance(e, urllib.error.HTTPError) and e.code == 403:
+            reason = ("SEC refused the request (HTTP 403 Forbidden): check that SEC_USER_AGENT (env var or .env) "
+                      "holds your real name and contact email, and that you are not on a VPN or cloud IP SEC blocks")
+        else:
+            reason = f"{type(e).__name__}: {str(e)[:200]}"
         try:
-            return _unavailable(paths, company, f"{type(e).__name__}: {str(e)[:200]}")
+            return _unavailable(paths, company, reason)
         except Exception:
             return f"unavailable ({type(e).__name__})"
 
 
 def _build(paths: Paths, company: str) -> str:
-    tickers = _get_json(TICKERS_URL)
+    ua, problem = sec_contact()
+    if not ua:   # SEC would answer 403, so do not send anonymous requests
+        return _unavailable(paths, company, f"{problem}; set your name and email with "
+                                            "`python -m graph --set-sec-contact`")
+    tickers = _get_json(TICKERS_URL, ua)
     found = resolve_cik(company, paths.key, tickers)
     if not found:
         return _unavailable(paths, company, "company not found in the SEC ticker list (not an SEC registrant, "
                                             "or the name/ticker did not match exactly)")
     cik, ticker = found
-    facts = _get_json(FACTS_URL.format(cik=cik))
-    subs = _get_json(SUBMISSIONS_URL.format(cik=cik))
+    facts = _get_json(FACTS_URL.format(cik=cik), ua)
+    subs = _get_json(SUBMISSIONS_URL.format(cik=cik), ua)
     raw = paths.data_dir / "raw"
     raw.mkdir(parents=True, exist_ok=True)
     (raw / "companyfacts.json").write_text(json.dumps(facts), encoding="utf-8")   # unmodified, for audit

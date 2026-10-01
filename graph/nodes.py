@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import shutil
 import time
 from contextlib import AsyncExitStack
@@ -95,7 +94,8 @@ class Workflow:
         # read and only fixes what was rejected). A session that failed to execute is replaced by a fresh one
         # that gets the full task again. `started` marks the session start: files must be written after it.
         use = Usage()
-        vkw = {"scores": state.get("scores"), "unresolved": ctx.get("unresolved") or []}
+        vkw = {"scores": state.get("scores"), "unresolved": ctx.get("unresolved") or [],
+               "previous_ids": [f.id for f in ctx.get("previous_findings") or ()]}
         errors, attempts, started = [], 0, time.time()
         async with AsyncExitStack() as stack:
             session = None
@@ -171,7 +171,7 @@ class Workflow:
             raise NodeFailure(f"cannot load the project data rules for the agents: {e}")
 
         stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        old = [p for p in (*paths.research_dir.glob("*.md"), *paths.meta_dir.glob("*.json"),
+        old = [p for p in (*paths.research_dir.glob("*.md"), *paths.meta_dir.rglob("*"),
                            *paths.data_dir.rglob("*")) if p.is_file()]
         old += [p for p in paths.reports_dir.glob("*") if p.is_file()]
         if old:  # a fresh run must never mistake earlier outputs for its own
@@ -234,7 +234,13 @@ class Workflow:
                     "history": [_event(f"review: no research file changed in round {it}, so the previous review "
                                        f"stands ({c.high} HIGH, {c.medium} MEDIUM, {c.low} LOW); not re-run")]}
         prev = [contracts.Finding.model_validate(f) for f in state.get("findings", [])]
-        upd = await self._execute("review", state, previous_findings=prev)
+        changes = manifest.reviewed_changes(paths) if it else None   # re-review: only what changed since the last
+        upd = await self._execute("review", state, previous_findings=prev, changes=changes)
+        manifest.snapshot_reviewed(paths)
+        if it:
+            scope = (f"scoped to {sum(c.changed for c in changes)} changed file(s)" if changes is not None
+                     else "full re-audit (no snapshot of the last reviewed files)")
+            upd["history"].append(_event(f"review: re-review {scope}"))
         rev = contracts.load_review(paths.sidecar("review"))
         n_high_correctable = sum(contracts.is_correctable(f, "HIGH") for f in rev.findings)
         n_medium_correctable = sum(contracts.is_correctable(f, "MEDIUM") for f in rev.findings)
@@ -267,18 +273,33 @@ class Workflow:
                                        f"(overall round {total_rnd}): owners={sorted(plan)}")]}]
         if first:
             updates += await self._parallel([self._execute(a, rstate, findings=plan[a], phase=phase) for a in first])
-        # Downstream refresh comes from content hashes, not from a hand-written rule. A mos that already
-        # finished this round (before an interruption) must still be merged into the state.
-        if "mos" in plan or manifest.stale_agents(paths, ("mos",)) or manifest.completed_in_round(paths, "mos", total_rnd):
+        # Downstream refresh comes from the manifest, not from a hand-written rule: mos is stale only if a key figure
+        # it depends on changed (MOS_SUBSTANCE_FIELDS: scores, price, intrinsic value). A mos that already finished
+        # this round (before an interruption) must still be merged into the state.
+        upstream_changed = bool(manifest.stale_agents(paths, ("mos",)))
+        if "mos" in plan or upstream_changed or manifest.completed_in_round(paths, "mos", total_rnd):
+            mos_findings = list(plan.get("mos", ()))
+            if severity == "HIGH" and not mos_findings:
+                # mos is re-run anyway (its inputs changed): its open MEDIUM findings ride along, as they would
+                # with a HIGH finding of its own
+                mos_findings = [f for f in routing.actionable(state["findings"], "MEDIUM", attempts) if f.owner == "mos"]
+                for f in mos_findings:
+                    attempts[f.id] = attempts.get(f.id, 0) + 1
+                if mos_findings:
+                    updates.append({"history": [_event(f"mos: re-run for changed inputs; its MEDIUM finding(s) "
+                                                       f"{[f.id for f in mos_findings]} sent along")]})
             merged = _merge(*updates)
             mstate = {**rstate, "status": {**state.get("status", {}), **merged["status"]},
                       "scores": {**state.get("scores", {}), **merged["scores"]}}
             try:
-                updates.append(await self._execute("mos", mstate, findings=plan.get("mos", ()),
-                                                   upstream_changed=bool(first), phase=phase))
+                updates.append(await self._execute("mos", mstate, findings=mos_findings,
+                                                   upstream_changed=upstream_changed, phase=phase))
             except NodeFailure as e:   # the agents corrected before mos still count in the run summary
                 e.completed = updates + e.completed
                 raise
+        elif first:
+            updates.append({"history": [_event("mos: no score, share price or intrinsic value it depends on "
+                                               "changed; not re-run")]})
         out = _merge(*updates)
         out["iteration"] = total_rnd
         out[round_field] = phase_rnd
@@ -298,11 +319,9 @@ class Workflow:
 
     def _flag(self, state: dict, severity: str, round_field: str, cap: int) -> tuple[list[dict], str]:
         """Record the open findings of `severity` as unresolved: the phase's round cap was reached, or every one was
-        already sent back MAX_FINDING_ATTEMPTS times without being fixed. Returns (findings, history event)."""
-        paths = self.paths(state)
+        already sent back MAX_FINDING_ATTEMPTS times without being fixed. Returns (findings, history event); the
+        run summary (run_summary.json) is where they are persisted."""
         unresolved = [f.model_dump() for f in routing.correctable(state["findings"], severity)]
-        (paths.meta_dir / f"unresolved_{severity.lower()}.json").write_text(json.dumps(unresolved, indent=2),
-                                                                            encoding="utf-8")
         why = (f"{severity} correction limit ({cap}) reached" if state.get(round_field, 0) >= cap else
                f"every open {severity} issue was already sent back {MAX_FINDING_ATTEMPTS} times without being fixed")
         return unresolved, _event(f"{why}; {len(unresolved)} {severity} issue(s) flagged unresolved")

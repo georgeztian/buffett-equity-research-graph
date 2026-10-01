@@ -7,7 +7,8 @@ import re
 from datetime import date
 from pathlib import Path
 
-from .config import AGENT_FILE, ANALYSTS, DEPENDS, MAX_CORRECTIONS, MAX_MEDIUM_CORRECTIONS, Paths
+from .config import (AGENT_FILE, ANALYSTS, DEPENDS, MAX_CORRECTIONS, MAX_MEDIUM_CORRECTIONS, PRICE_MAX_AGE_DAYS,
+                     Paths)
 
 SKILL_DIR = Path(".claude/skills/buffett-analysis")
 
@@ -58,6 +59,21 @@ def load_references(root: Path, agent: str) -> str:
 
 
 def _sidecar_schema(agent: str) -> str:
+    if agent == "valuation":
+        return ('{"score": <integer 1-10, the same score stated in your markdown file>, "summary": "<one sentence>", '
+                '"share_price": <the current share price used, a number, exactly as stated in your markdown>, '
+                '"price_date": "<YYYY-MM-DD, the date of that price>", '
+                '"intrinsic_value_per_share": {"low": <number>, "base": <number>, "high": <number>}}\n'
+                "The intrinsic value figures are your per-share estimate's range and central value, in the price's "
+                "currency (low <= base <= high; give the same number three times if you state a single value).")
+    if agent == "mos":
+        return ('{"score": <integer 1-10, the same score stated in your markdown file>, "summary": "<one sentence>", '
+                '"share_price": <exactly the valuation sidecar\'s share_price>, '
+                '"price_date": "<exactly the valuation sidecar\'s price_date>", '
+                '"intrinsic_value_per_share": <the valuation\'s per-share intrinsic value you measure against, '
+                'within its low-high range>, '
+                '"margin_of_safety_pct": <(intrinsic_value_per_share - share_price) / intrinsic_value_per_share * 100, '
+                'negative if the price is above it>}')
     if agent in ANALYSTS or agent == "business":
         return ('{"score": <integer 1-10, the same score stated in your markdown file>, '
                 '"summary": "<one sentence>"}')
@@ -67,7 +83,9 @@ def _sidecar_schema(agent: str) -> str:
                           "owner": "moat|management|valuation|mos|report", "required_correction": "..."}],
         }, indent=2)
     return ('{"financial_quality_score": <integer 1-10>, "scores_reported": '
-            '{"moat": <int>, "management": <int>, "valuation": <int>, "mos": <int>}}')
+            '{"moat": <int>, "management": <int>, "valuation": <int>, "mos": <int>}, '
+            '"share_price": <the report\'s share price reference: exactly the valuation sidecar\'s share_price>, '
+            '"price_date": "<exactly the valuation sidecar\'s price_date>"}')
 
 
 def system_prompt(root: Path, paths: Paths, agent: str, company: str, iteration: int, *,
@@ -88,8 +106,8 @@ def system_prompt(root: Path, paths: Paths, agent: str, company: str, iteration:
         "SEC XBRL filings (a primary source) and is shared by every agent in this run. Read it before other research. "
         "Its FACT values carry their filing references and may be cited as SEC filings without fetching those filings "
         "again; its CALCULATION rows show their formulas. Research as usual anything it does not cover or that needs "
-        "context (segment detail, narrative, market data, current share price). If it says it is unavailable, "
-        "research everything as usual.",
+        "context (segment detail, narrative" + (", market data, current share price" if agent in ("valuation", "review")
+                                                 else "") + "). If it says it is unavailable, research everything as usual.",
         f"- Main output file: `{paths.rel(paths.output(agent))}`",
         f"- After the main file is saved, write a JSON sidecar to `{paths.rel(paths.sidecar(agent))}` "
         "containing ONLY valid JSON of this shape:",
@@ -99,6 +117,21 @@ def system_prompt(root: Path, paths: Paths, agent: str, company: str, iteration:
         contract.append(
             "- Label substantive statements in your markdown as FACT, CALCULATION, ASSUMPTION or JUDGMENT, "
             "record source and period for key numbers, and state your 1-10 score explicitly under the word 'Score'.")
+        contract.append("- The workflow checks your files mechanically before the review: the sidecar must agree "
+                        "with the markdown" + (f", and the share price must be current (dated within {PRICE_MAX_AGE_DAYS} days)"
+                                               if agent == "valuation"
+                                               else ", and it must use the valuation's exact price and date and an "
+                                               "intrinsic value within its range" if agent == "mos" else "") + ".")
+    if agent in ("mos", "report"):
+        contract.append(f"- The valuation's key figures, including the reference share price and its date, are in its "
+                        f"sidecar `{paths.rel(paths.sidecar('valuation'))}` (an exception to the `_meta/` rule above: "
+                        "you may read that one file).")
+    if agent in ("moat", "management", "business"):
+        contract.append("- The valuation analysis, running in parallel with you, sets the run's single reference share "
+                        "price. Do not state a current share price, or figures computed from one (market "
+                        "capitalization, P/E, P/B, dividend or earnings yield, EV multiples, and the like). Historical "
+                        "prices with their dates are fine where your analysis needs them (e.g. prices paid in past "
+                        "share repurchases, or a holding valued at the price on a stated past date).")
     if agent == "review":
         contract += [
             f"- This is review pass {iteration + 1}.",
@@ -129,6 +162,8 @@ def system_prompt(root: Path, paths: Paths, agent: str, company: str, iteration:
                             "corrected; it goes to the final report flagged as unresolved.")
     if agent == "report":
         contract.append("- Use exactly the upstream scores given in the task for `scores_reported`; do not average them.")
+        contract.append("- The share price reference and every mention of the current price use exactly the "
+                        "valuation's share price and date; the workflow checks this mechanically.")
         contract.append("- `financial_quality_score` is the score in the business analysis; change it only where an "
                         "issue owned by the report requires it, and then say in the report why.")
     sections = [
@@ -152,7 +187,7 @@ def _fmt_findings(findings) -> str:
 def user_prompt(paths: Paths, agent: str, company: str, *, findings=(), upstream_changed: bool = False,
                 scores: dict[str, int] | None = None, unresolved=(), report_notes=(), iteration: int = 0,
                 high_iteration: int = 0, medium_iteration: int = 0, phase: str | None = None,
-                previous_findings=()) -> str:
+                previous_findings=(), changes=None) -> str:
     parts = [f"Perform your role for the company: {company}."]
     if DEPENDS[agent]:
         parts.append(f"Read your upstream inputs from `research/{paths.key}/` as your instructions describe.")
@@ -171,12 +206,18 @@ def user_prompt(paths: Paths, agent: str, company: str, *, findings=(), upstream
                      "passages, including every figure or conclusion elsewhere in the file that depends on them, rather "
                      "than rewriting the whole file.")
         if findings:
+            if phase == "high" and any(f.severity == "MEDIUM" for f in findings):
+                parts.append("Your open MEDIUM findings are included in this round because your file is being "
+                             "updated anyway; fix them too.")
             parts.append(_fmt_findings(findings))
         if findings and upstream_changed:
             parts.append("Upstream research files also changed in this round; re-read them.")
     if agent == "review" and iteration:
-        parts.append(f"\nThis re-reviews corrections made in round {iteration}. Re-audit everything, and explicitly verify "
-                     "the previously reported issues are fixed.")
+        if changes is not None:
+            parts.append(_scope(iteration, changes))
+        else:
+            parts.append(f"\nThis re-reviews corrections made in round {iteration}. Re-audit everything, and "
+                         "explicitly verify the previously reported issues are fixed.")
         if previous_findings:
             parts.append("\n## Findings of the previous review pass\n"
                          "State in review.md whether each one is now fixed. Keep the same id for an issue that is still "
@@ -192,6 +233,30 @@ def user_prompt(paths: Paths, agent: str, company: str, *, findings=(), upstream
         if report_notes:
             parts.append("\n## Issues owned by the report (you must address these)\n" + _fmt_findings(report_notes))
     return "\n".join(parts)
+
+
+def _scope(iteration: int, changes) -> str:
+    """Re-review limited to what changed since the last review (manifest.reviewed_changes)."""
+    unchanged = [c.rel for c in changes if not c.changed]
+    full = [c.rel for c in changes if c.changed and c.diff is None]
+    out = [f"\n## SCOPE OF THIS RE-REVIEW (after correction round {iteration})",
+           "Earlier review passes have audited every research file. Since the last pass, only the changes shown below "
+           "were made. Do not re-audit unchanged text from scratch:",
+           "1. Verify each previously reported finding against the current files.",
+           "2. Audit every changed passage in full, including its consistency with the rest of its file and with the "
+           "other research files (figures, prices, scores and conclusions that depend on it, in any file).",
+           "3. A previous finding on text that did not change stays open with the same id unless the change "
+           "resolves it.",
+           "Open other files only as far as steps 1-2 require."]
+    if unchanged:
+        out.append("Unchanged since the last review: " + ", ".join(f"`{r}`" for r in unchanged) + ".")
+    if full:
+        out.append("Changed too extensively to show as a diff; read in full and audit as new: "
+                   + ", ".join(f"`{r}`" for r in full) + ".")
+    for c in changes:
+        if c.changed and c.diff is not None:
+            out.append(f"\n### Changes to `{c.rel}`\n```diff\n{c.diff}\n```")
+    return "\n".join(out)
 
 
 def fix_prompt(errors: list[str]) -> str:

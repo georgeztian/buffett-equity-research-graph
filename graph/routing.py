@@ -41,6 +41,15 @@ def route_after_review(state: dict) -> str:
 
 def plan_corrections(findings: list[dict], severity: Severity = "HIGH",
                      attempts: dict[str, int] | None = None) -> dict[str, list[Finding]]:
-    """owner agent -> its actionable findings of the given severity, in analyst order."""
+    """owner agent -> its actionable findings of the given severity, in analyst order. In a HIGH round, an owner
+    that is being corrected anyway also gets its actionable MEDIUM findings (after its HIGH ones): fixing them
+    while the file is open costs no extra round. Owners with only MEDIUM findings still wait for the MEDIUM phase
+    (except mos when it is re-run for changed inputs: see nodes._run_correction_round), and the MEDIUM round cap is
+    unaffected (per-finding attempts count as usual)."""
     sel = actionable(findings, severity, attempts or {})
-    return {a: [f for f in sel if f.owner == a] for a in ANALYSTS if any(f.owner == a for f in sel)}
+    plan = {a: [f for f in sel if f.owner == a] for a in ANALYSTS if any(f.owner == a for f in sel)}
+    if severity == "HIGH":
+        for f in actionable(findings, "MEDIUM", attempts or {}):
+            if f.owner in plan:
+                plan[f.owner].append(f)
+    return plan

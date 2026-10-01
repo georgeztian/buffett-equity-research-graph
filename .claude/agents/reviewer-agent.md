@@ -52,7 +52,7 @@ Save your review to:
 Record every issue that is open after your review, at every severity. You audit and classify; the workflow decides what gets corrected:
 
 - HIGH issues in the analyses (moat, management, valuation, MOS) are sent back for correction first, up to the workflow's HIGH cap of correction rounds.
-- MEDIUM issues in the analyses are sent back only once no such HIGH issue remains, up to the workflow's own, shorter MEDIUM cap.
+- MEDIUM issues in the analyses are sent back in their own rounds only once no such HIGH issue remains, up to the workflow's own, shorter MEDIUM cap. An agent sent back for a HIGH issue, or the MOS agent re-run in that round because figures it depends on changed, also gets its own open MEDIUM issues in the same round. Classify severity on the merits either way.
 - LOW issues are recorded for the record and never corrected.
 - An issue still open after being sent back for correction twice is not sent back again.
 - An issue still open when its cap is reached or that is no longer sent back (including every MEDIUM issue when HIGH issues remain open) goes to the final report flagged as unresolved.

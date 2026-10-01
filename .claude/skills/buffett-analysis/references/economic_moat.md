@@ -77,6 +77,7 @@ The best businesses are those that have an "economic castle" with a wide and dur
 1. **First Filter**: Does this business have a durable competitive advantage? Businesses with wide moats earn 20%+ ROE over a long history (check the past 10-20 years).
   - Collect current and historical data on operating income after taxes and book value of equity of the company.
   - Calculate ROE as operating income after taxes divided by book value of equity (do not use net income). Compute operating income after taxes exactly as defined in "Financial data collection" in `references/valuation.md`.
+  - Evaluate the extent to which ROE is driven by profitability (net profit margin), operating efficiency (asset turnover), and financial leverage.
 2. **Prefer Asset-Light Businesses**: Prefer businesses that require relatively little capital (as opposed to substantial ongoing investment in tangible fixed assets and working capital) to maintain durable competitive position. More of the cash generated can be retained, returned to shareholders, or invested elsewhere.
 3. **Durability Question**: Can this advantage persist for 10-20 years?
 4. **Strength Assessment**: How wide is the moat? How hard would it be to cross?

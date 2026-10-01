@@ -1,19 +1,81 @@
 """Content-hash manifest: records which input versions each output was built from."""
 from __future__ import annotations
 
+import difflib
 import hashlib
 import json
+import shutil
+from dataclasses import dataclass
 from pathlib import Path
 
-from .config import DEPENDS, Paths
+from . import contracts
+from .config import DEPENDS, MOS_SUBSTANCE_FIELDS, REVIEW_DIFF_MAX_CHARS, Paths
 
 
 def sha(path: Path) -> str | None:
     return hashlib.sha256(path.read_bytes()).hexdigest() if path.exists() else None
 
 
+def substance(paths: Paths, agent: str) -> str | None:
+    """Hash of the sidecar fields of `agent` that the MOS analysis depends on (MOS_SUBSTANCE_FIELDS), or None if
+    the output or its sidecar is missing or invalid. Values are normalized through the sidecar schema, so a
+    re-saved sidecar that writes 150 as 150.0 (or reorders keys) does not count as a change."""
+    model = contracts.ValuationSidecar if agent == "valuation" else contracts.ScoreSidecar
+    try:
+        side = model.model_validate_json(paths.sidecar(agent).read_text(encoding="utf-8"))
+    except (OSError, ValueError):   # pydantic's ValidationError is a ValueError
+        return None
+    if not paths.output(agent).exists():
+        return None
+    key = side.model_dump(mode="json", include=set(MOS_SUBSTANCE_FIELDS[agent]))
+    return "substance:" + hashlib.sha256(json.dumps(key, sort_keys=True).encode()).hexdigest()
+
+
 def input_hashes(paths: Paths, agent: str) -> dict[str, str | None]:
+    """The input versions an output is built from: file content hashes, except for mos, whose inputs are
+    fingerprinted by their key figures, so a correction that changes none of them does not make mos stale."""
+    if agent == "mos":
+        return {d: substance(paths, d) for d in DEPENDS[agent]}
     return {d: sha(paths.output(d)) for d in DEPENDS[agent]}
+
+
+def _reviewed_copy(paths: Paths, agent: str) -> Path:
+    return paths.meta_dir / "reviewed" / paths.output(agent).name
+
+
+def snapshot_reviewed(paths: Paths) -> None:
+    """Keep a copy of every file the reviewer just audited, so the next re-review can be limited to what changed."""
+    for a in DEPENDS["review"]:
+        dest = _reviewed_copy(paths, a)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(paths.output(a), dest)
+
+
+@dataclass
+class Change:
+    agent: str
+    rel: str                 # project-relative path of the file
+    diff: str | None         # unified diff; None if unchanged, or if too long to be useful (then: re-read in full)
+    changed: bool
+
+
+def reviewed_changes(paths: Paths) -> list[Change] | None:
+    """How each file the reviewer reads changed since the last review, or None if there is no complete snapshot
+    (then the re-review audits everything)."""
+    out = []
+    for a in DEPENDS["review"]:
+        old_p, new_p = _reviewed_copy(paths, a), paths.output(a)
+        if not old_p.exists() or not new_p.exists():
+            return None
+        old = old_p.read_text(encoding="utf-8", errors="replace").replace("\r\n", "\n")
+        new = new_p.read_text(encoding="utf-8", errors="replace").replace("\r\n", "\n")
+        if old == new:
+            out.append(Change(a, paths.rel(new_p), None, False))
+            continue
+        diff = "\n".join(difflib.unified_diff(old.splitlines(), new.splitlines(), f"{new_p.name} (as last reviewed)",
+                                              f"{new_p.name} (now)", n=2, lineterm=""))
+        out.append(Change(a, paths.rel(new_p), diff if len(diff) <= REVIEW_DIFF_MAX_CHARS else None, True))
+    return out
 
 
 def load(paths: Paths) -> dict:

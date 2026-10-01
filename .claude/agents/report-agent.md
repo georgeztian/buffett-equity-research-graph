@@ -27,7 +27,7 @@ You are responsible for the "Company Overview", "Business Model", and "Financial
 
 ## When to produce the report
 
-Only produce the final report once the review stage is over: either the research passed review, or the correction loop ended with issues still open (a severity's cap of correction rounds was reached, or an issue was still open after being sent back for correction twice; when HIGH issues remain open, open MEDIUM issues are not attempted either). In the second case, clearly flag every unresolved issue in the report, labeled with its severity (HIGH or MEDIUM). LOW-severity issues are never required to be corrected and are not treated as unresolved.
+Only produce the final report once the review stage is over: either the research passed review, or the correction loop ended with issues still open (a severity's cap of correction rounds was reached, or an issue was still open after being sent back for correction twice; when HIGH issues remain open, no MEDIUM correction rounds are run either). In the second case, clearly flag every unresolved issue in the report, labeled with its severity (HIGH or MEDIUM). LOW-severity issues are never required to be corrected and are not treated as unresolved.
 
 ## Audience and style
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import date
 from pathlib import Path
 from typing import Literal
 
@@ -17,6 +18,34 @@ Severity = Literal["HIGH", "MEDIUM", "LOW"]
 class ScoreSidecar(BaseModel):
     score: int = Field(ge=1, le=10)
     summary: str = ""
+
+
+class IntrinsicValueRange(BaseModel):
+    low: float = Field(gt=0)
+    base: float = Field(gt=0)
+    high: float = Field(gt=0)
+
+    @model_validator(mode="after")
+    def _ordered(self) -> "IntrinsicValueRange":
+        if not self.low <= self.base <= self.high:
+            raise ValueError(f"intrinsic value range must satisfy low <= base <= high, got "
+                             f"{self.low} / {self.base} / {self.high}")
+        return self
+
+
+class ValuationSidecar(ScoreSidecar):
+    """Key figures stated in valuation.md, so the workflow can check them mechanically and tell whether a
+    correction changed anything the MOS analysis depends on."""
+    share_price: float = Field(gt=0)
+    price_date: date
+    intrinsic_value_per_share: IntrinsicValueRange
+
+
+class MosSidecar(ScoreSidecar):
+    share_price: float = Field(gt=0)
+    price_date: date
+    intrinsic_value_per_share: float = Field(gt=0)   # the valuation's estimate this analysis measures against
+    margin_of_safety_pct: float                        # (intrinsic value - price) / intrinsic value * 100
 
 
 class Finding(BaseModel):
@@ -53,6 +82,8 @@ class ReviewSidecar(BaseModel):
 class ReportSidecar(BaseModel):
     financial_quality_score: int = Field(ge=1, le=10)
     scores_reported: dict[str, int]
+    share_price: float = Field(gt=0)   # the report's share price reference: must be the valuation's
+    price_date: date
 
 
 SUMMARY_LINE = re.compile(
@@ -73,6 +104,14 @@ def load_json(path: Path) -> dict:
 
 def load_score(path: Path) -> ScoreSidecar:
     return ScoreSidecar.model_validate(load_json(path))
+
+
+def load_valuation(path: Path) -> ValuationSidecar:
+    return ValuationSidecar.model_validate(load_json(path))
+
+
+def load_mos(path: Path) -> MosSidecar:
+    return MosSidecar.model_validate(load_json(path))
 
 
 def load_review(path: Path) -> ReviewSidecar:

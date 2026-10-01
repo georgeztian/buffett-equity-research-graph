@@ -13,6 +13,10 @@ MAX_CORRECTIONS = 5          # Stage 4 iteration cap, HIGH-severity findings
 MAX_MEDIUM_CORRECTIONS = 2   # Stage 4b iteration cap, MEDIUM-severity findings (runs after HIGH is clear)
 MAX_FINDING_ATTEMPTS = 2     # correction attempts per finding id; one still open after this many is not sent again
 MAX_VALIDATION_RETRIES = 2   # retries per node when output fails validation
+PRICE_MAX_AGE_DAYS = 14      # the valuation's share price may be at most this old (mechanical pre-review check)
+MOS_PCT_TOLERANCE = 1.0      # percentage points: stated margin of safety vs the one implied by price and value
+IV_TOLERANCE = 0.005         # relative slack when checking the MOS agent's intrinsic value against the valuation's range
+REVIEW_DIFF_MAX_CHARS = 25_000   # a changed file whose diff is longer than this is re-read in full on re-review
 AGENT_TIMEOUT_SECONDS = 45 * 60
 # The SDK's default 1 MB per-message limit is exceeded when an agent fetches a large filing
 # (e.g. a 10-K page), which kills the attempt with "JSON message exceeded maximum buffer size".
@@ -41,6 +45,14 @@ DEPENDS: dict[str, tuple[str, ...]] = {
     "mos": RESEARCH_AGENTS,
     "review": ANALYSTS + ("business",),
     "report": ANALYSTS + ("business", "review"),
+}
+
+# What the MOS analysis substantively depends on: these sidecar fields of its inputs. A correction upstream that
+# leaves them all unchanged (e.g. a reworded moat passage) does not make mos.md stale, so MOS is not re-run for it.
+MOS_SUBSTANCE_FIELDS: dict[str, tuple[str, ...]] = {
+    "moat": ("score",),
+    "management": ("score",),
+    "valuation": ("score", "share_price", "price_date", "intrinsic_value_per_share"),
 }
 
 AGENT_FILE = {

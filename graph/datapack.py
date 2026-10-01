@@ -177,8 +177,7 @@ def _fmt(val: float | None, unit: str) -> str:
         return "—"
     if unit == PER_SHARE:
         return f"{val:.2f}"
-    s = f"{val / 1e6:,.3f}".rstrip("0").rstrip(".")   # USD millions / shares in millions, no rounding of M-level data
-    return s
+    return f"{val / 1e6:,.3f}".rstrip("0").rstrip(".")   # USD millions / shares in millions, no rounding of M-level data
 
 
 def _pct(x: float | None) -> str:

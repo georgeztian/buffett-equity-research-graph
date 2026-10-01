@@ -28,8 +28,12 @@ def _elapsed(started: str | None, finished: str) -> float | None:
 
 def build_summary(paths: Paths, state: dict, error: str | None = None, paused: bool = False) -> dict:
     report = paths.output("report")
-    complete = error is None and report.exists()
     status = state.get("status", {})
+    # A report file can exist without being accepted (its node failed validation): only a completed report agent
+    # makes it the final report, and only then are the MOS audit's HIGH/MEDIUM issues fixed in it (else pending).
+    report_done = status.get("report", {}).get("state") == "complete" and report.exists()
+    complete = error is None and report_done
+    mos_to_fix = [f for f in state.get("mos_findings", []) if f.get("severity") in ("HIGH", "MEDIUM")]
     agents = {a: status.get(a, {"state": "not_run"}) for a in ALL_AGENTS}
     finished = datetime.now(timezone.utc).isoformat(timespec="seconds")
     return {
@@ -48,18 +52,27 @@ def build_summary(paths: Paths, state: dict, error: str | None = None, paused: b
         "medium_correction_iterations": state.get("medium_iteration", 0),
         "total_correction_iterations": state.get("iteration", 0),
         "scores": state.get("scores", {}),
+        "reported_scores": state.get("reported_scores", {}),
+        "mos_score_change": state.get("mos_score_change"),
         "unresolved_high_issues": state.get("unresolved_high", []),
         "unresolved_medium_issues": state.get("unresolved_medium", []),
-        "final_report": paths.rel(report) if report.exists() else None,
+        "mos_audit_issues": state.get("mos_findings", []),
+        "mos_audit_issues_fixed_in_report": mos_to_fix if report_done else [],
+        "mos_audit_issues_pending_report": [] if report_done else mos_to_fix,
+        "final_report": paths.rel(report) if report_done else None,
         "history": state.get("history", []),
     }
 
 
 def render_markdown(s: dict) -> str:
+    pending = {f["id"] for f in s.get("mos_audit_issues_pending_report") or []}
     lines = [f"# Workflow Execution Summary: {s['company']}", "",
              f"- Status: **{s['workflow_status']}**", f"- Run id: `{s['run_id']}`",
-             f"- HIGH correction rounds performed: {s['high_correction_iterations']}",
-             f"- MEDIUM correction rounds performed: {s['medium_correction_iterations']}",
+             f"- HIGH correction rounds performed (each also corrects the open MEDIUM issues): "
+             f"{s['high_correction_iterations']}",
+             f"- MEDIUM-only correction rounds performed: {s['medium_correction_iterations']}",
+             f"- MOS audit issues pending, to be fixed by the report agent (it has not completed): {len(pending)}"
+             if pending else f"- MOS audit issues fixed in the report: {len(s['mos_audit_issues_fixed_in_report'])}",
              f"- Final report: {s['final_report'] or 'not produced'}"]
     dp = s.get("data_pack")
     if dp and dp.startswith("unavailable"):
@@ -88,7 +101,16 @@ def render_markdown(s: dict) -> str:
                   f"estimate), {ut.get('output_tokens', 0):,} output tokens, "
                   f"{ut.get('input_tokens', 0) + ut.get('cache_read_input_tokens', 0) + ut.get('cache_creation_input_tokens', 0):,} "
                   "input tokens."]
-    lines += ["", "## Scores (1-10)", ""] + [f"- {k}: {v}" for k, v in s["scores"].items()]
+    lines += ["", "## Scores (1-10)", ""]
+    reported, change = s.get("reported_scores") or {}, s.get("mos_score_change")
+    for k, v in s["scores"].items():
+        r = reported.get(k)
+        line = f"- {k}: {v}"
+        if r is not None and r != v:   # only the MOS score can differ, and only with a validated recorded change
+            line += f" (MOS agent) -> {r} in the report, after the MOS audit"
+            if change:
+                line += f" (issue(s) {', '.join(change['finding_ids'])}: {change['reason']})"
+        lines.append(line)
     lines += ["", "## Unresolved HIGH-severity issues", ""]
     if s["unresolved_high_issues"]:
         for f in s["unresolved_high_issues"]:
@@ -101,6 +123,17 @@ def render_markdown(s: dict) -> str:
             lines.append(f"- **[{f['id']}]** ({f['owner']}) {f['problem']} — required: {f['required_correction']}")
     else:
         lines.append("None.")
+    lines += ["", "## MOS audit issues (the MOS agent is not re-run; HIGH and MEDIUM are fixed in the report)", ""]
+    if s.get("mos_audit_issues"):
+        for f in s["mos_audit_issues"]:
+            how = ("recorded only" if f["severity"] not in ("HIGH", "MEDIUM")
+                   else "pending: to be fixed in the report" if f["id"] in pending else "fixed in the report")
+            lines.append(f"- **[{f['id']}]** ({f['severity']}, {how}) {f['problem']} — required: "
+                         f"{f['required_correction']}")
+    elif s["agents"].get("mos_review", {}).get("state") == "complete":
+        lines.append("None.")
+    else:
+        lines.append("The MOS audit has not run.")
     lines += ["", "## Execution history", ""] + [f"1. {h}" for h in s["history"]]
     return "\n".join(lines) + "\n"
 

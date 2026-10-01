@@ -9,8 +9,9 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
-from .config import ANALYSTS
+from .config import CORRECTABLE
 
+# `mos` owns only findings of the MOS audit (mos_review); they are fixed by the report agent, never sent back.
 Owner = Literal["moat", "management", "valuation", "mos", "report"]
 Severity = Literal["HIGH", "MEDIUM", "LOW"]
 
@@ -34,8 +35,8 @@ class IntrinsicValueRange(BaseModel):
 
 
 class ValuationSidecar(ScoreSidecar):
-    """Key figures stated in valuation.md, so the workflow can check them mechanically and tell whether a
-    correction changed anything the MOS analysis depends on."""
+    """Key figures stated in valuation.md, so the workflow can check them (and the MOS analysis and report against
+    them) mechanically."""
     share_price: float = Field(gt=0)
     price_date: date
     intrinsic_value_per_share: IntrinsicValueRange
@@ -65,7 +66,7 @@ class Counts(BaseModel):
 
 class ReviewSidecar(BaseModel):
     """Only `findings` is authoritative. Severity counts are derived from it in code (never asked of the model),
-    so they cannot disagree with the findings; a `counts` key left in an older-style sidecar is ignored."""
+    so they cannot disagree with the findings; any extra `counts` key in the sidecar is ignored."""
     findings: list[Finding]
 
     @model_validator(mode="after")
@@ -79,11 +80,21 @@ class ReviewSidecar(BaseModel):
         return Counts(**{s.lower(): sum(f.severity == s for f in self.findings) for s in ("HIGH", "MEDIUM", "LOW")})
 
 
+class MosScoreChange(BaseModel):
+    """Why the report uses a different MOS score than the MOS analysis: allowed only when issues of the MOS audit
+    require it, since the MOS agent is never re-run to correct its own score."""
+    original: int = Field(ge=1, le=10)            # the MOS analysis's score
+    corrected: int = Field(ge=1, le=10)           # the score the report uses
+    finding_ids: list[str] = Field(min_length=1)  # the MOS audit finding(s) that require the change
+    reason: str = Field(min_length=20)
+
+
 class ReportSidecar(BaseModel):
     financial_quality_score: int = Field(ge=1, le=10)
     scores_reported: dict[str, int]
     share_price: float = Field(gt=0)   # the report's share price reference: must be the valuation's
     price_date: date
+    mos_score_change: MosScoreChange | None = None   # set only when scores_reported["mos"] differs from the MOS's
 
 
 SUMMARY_LINE = re.compile(
@@ -122,6 +133,6 @@ def load_report(path: Path) -> ReportSidecar:
     return ReportSidecar.model_validate(load_json(path))
 
 
-def is_correctable(f: Finding, severity: Severity = "HIGH") -> bool:
-    """A finding of the given severity the correction loop can act on (owned by an upstream analyst)."""
-    return f.severity == severity and f.owner in ANALYSTS
+def is_correctable(f: Finding, severity: Severity) -> bool:
+    """A finding of the given severity the correction loop can act on (owned by moat, management or valuation)."""
+    return f.severity == severity and f.owner in CORRECTABLE

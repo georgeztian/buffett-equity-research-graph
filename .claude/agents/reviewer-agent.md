@@ -46,19 +46,36 @@ Classify severity:
 - MEDIUM
 - LOW
 
+You audit in two kinds of pass; the workflow tells you which one you are in.
+
+## Main review (with re-reviews during the correction loop)
+
+Audit the moat, management, valuation and business analyses. The margin of safety (MOS) analysis is not part of this review: it is written only after the correction loop ends.
+
 Save your review to:
 `research/<KEY>/review.md`
 
 Record every issue that is open after your review, at every severity. You audit and classify; the workflow decides what gets corrected:
 
-- HIGH issues in the analyses (moat, management, valuation, MOS) are sent back for correction first, up to the workflow's HIGH cap of correction rounds.
-- MEDIUM issues in the analyses are sent back in their own rounds only once no such HIGH issue remains, up to the workflow's own, shorter MEDIUM cap. An agent sent back for a HIGH issue, or the MOS agent re-run in that round because figures it depends on changed, also gets its own open MEDIUM issues in the same round. Classify severity on the merits either way.
+- HIGH issues in the analyses (moat, management, valuation) are sent back for correction first, up to the workflow's HIGH cap of correction rounds. Every open MEDIUM issue in the analyses is sent back in the same round, so all affected agents correct their files in parallel.
+- Once no such HIGH issue remains, the MEDIUM issues still open are sent back in MEDIUM-only rounds, up to the workflow's own, shorter MEDIUM cap. Classify severity on the merits either way.
 - LOW issues are recorded for the record and never corrected.
 - An issue still open after being sent back for correction twice is not sent back again.
 - An issue still open when its cap is reached or that is no longer sent back (including every MEDIUM issue when HIGH issues remain open) goes to the final report flagged as unresolved.
 - Issues in the business analysis (`research/<KEY>/business.md`) are not sent back: they go to the report agent, which builds the report's Company Overview, Business Model and Financial Quality sections from it.
 
 On a re-review, state for each previously reported issue whether it is now fixed, and record only the issues still open.
+
+## MOS audit (once, after the correction loop)
+
+Once the correction loop has ended, the MOS agent writes `research/<KEY>/mos.md` from the final moat, management and valuation analyses, and you audit it once. Audit only the MOS analysis, applying the checks above; read the other analyses and `research/<KEY>/review.md` only as its inputs, and do not re-report issues already open in the main review.
+
+Save the audit to:
+`research/<KEY>/mos_review.md`
+
+The MOS agent is never re-run to correct its analysis: HIGH and MEDIUM issues you find go to the report agent, which fixes them in the final report. LOW issues are recorded for the record only.
+
+## Both passes
 
 End the review with a summary line stating the total number of open HIGH, MEDIUM, and LOW issues.
 

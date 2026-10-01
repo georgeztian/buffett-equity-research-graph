@@ -9,8 +9,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
-MAX_CORRECTIONS = 5          # Stage 4 iteration cap, HIGH-severity findings
-MAX_MEDIUM_CORRECTIONS = 2   # Stage 4b iteration cap, MEDIUM-severity findings (runs after HIGH is clear)
+MAX_CORRECTIONS = 5          # Stage 3 iteration cap, HIGH-severity findings
+MAX_MEDIUM_CORRECTIONS = 2   # Stage 3b iteration cap, MEDIUM-only rounds (run after HIGH is clear; open MEDIUM
+                             # findings are also corrected in every HIGH round, which this cap does not count)
 MAX_FINDING_ATTEMPTS = 2     # correction attempts per finding id; one still open after this many is not sent again
 MAX_VALIDATION_RETRIES = 2   # retries per node when output fails validation
 PRICE_MAX_AGE_DAYS = 14      # the valuation's share price may be at most this old (mechanical pre-review check)
@@ -31,10 +32,14 @@ DATA_PACK_YEARS = 15         # fiscal years of XBRL history in the data pack
 
 RESEARCH_AGENTS = ("moat", "management", "valuation")   # Stage 1 analysts; the MOS agent's inputs
 STAGE1_AGENTS = RESEARCH_AGENTS + ("business",)         # Stage 1 (parallel)
-ANALYSTS = RESEARCH_AGENTS + ("mos",)                   # agents that can own a finding
-# `business` drafts the report's Company Overview, Business Model and Financial Quality sections. It is reviewed,
-# but not corrected: findings on it are owned by `report`, as they were when the report agent wrote these sections.
-ALL_AGENTS = RESEARCH_AGENTS + ("business", "mos", "review", "report")
+ANALYSTS = RESEARCH_AGENTS + ("mos",)                   # analyses whose scores the run records and the report checks
+                                                        # (business is scored too, as the report's financial quality)
+# Owners the correction loop (Stage 3) can send a finding back to. The MOS agent runs once, after the loop
+# (Stage 4), and is never re-run: its analysis is audited once (Stage 5, `mos_review`) and the issues found are
+# fixed by the report agent. `business` drafts the report's Company Overview, Business Model and Financial Quality
+# sections; it is reviewed, but not corrected: findings on it are owned by `report`.
+CORRECTABLE = RESEARCH_AGENTS
+ALL_AGENTS = RESEARCH_AGENTS + ("business", "mos", "review", "mos_review", "report")
 
 # agent -> agents whose output files it reads (the workflow's dependency graph)
 DEPENDS: dict[str, tuple[str, ...]] = {
@@ -42,17 +47,10 @@ DEPENDS: dict[str, tuple[str, ...]] = {
     "management": (),
     "valuation": (),
     "business": (),
-    "mos": RESEARCH_AGENTS,
-    "review": ANALYSTS + ("business",),
-    "report": ANALYSTS + ("business", "review"),
-}
-
-# What the MOS analysis substantively depends on: these sidecar fields of its inputs. A correction upstream that
-# leaves them all unchanged (e.g. a reworded moat passage) does not make mos.md stale, so MOS is not re-run for it.
-MOS_SUBSTANCE_FIELDS: dict[str, tuple[str, ...]] = {
-    "moat": ("score",),
-    "management": ("score",),
-    "valuation": ("score", "share_price", "price_date", "intrinsic_value_per_share"),
+    "review": RESEARCH_AGENTS + ("business",),
+    "mos": RESEARCH_AGENTS + ("review",),           # review.md: the upstream issues left open by the loop
+    "mos_review": RESEARCH_AGENTS + ("review", "mos"),
+    "report": RESEARCH_AGENTS + ("business", "mos", "review", "mos_review"),
 }
 
 AGENT_FILE = {
@@ -62,6 +60,7 @@ AGENT_FILE = {
     "business": "business-agent",
     "mos": "mos-agent",
     "review": "reviewer-agent",
+    "mos_review": "reviewer-agent",   # the same reviewer, in its one-time MOS audit pass
     "report": "report-agent",
 }
 
@@ -72,6 +71,7 @@ OUTPUT_NAME = {
     "business": "business.md",
     "mos": "mos.md",
     "review": "review.md",
+    "mos_review": "mos_review.md",
     "report": "final_investment_report.md",
 }
 

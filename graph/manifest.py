@@ -8,34 +8,15 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import contracts
-from .config import DEPENDS, MOS_SUBSTANCE_FIELDS, REVIEW_DIFF_MAX_CHARS, Paths
+from .config import DEPENDS, REVIEW_DIFF_MAX_CHARS, Paths
 
 
 def sha(path: Path) -> str | None:
     return hashlib.sha256(path.read_bytes()).hexdigest() if path.exists() else None
 
 
-def substance(paths: Paths, agent: str) -> str | None:
-    """Hash of the sidecar fields of `agent` that the MOS analysis depends on (MOS_SUBSTANCE_FIELDS), or None if
-    the output or its sidecar is missing or invalid. Values are normalized through the sidecar schema, so a
-    re-saved sidecar that writes 150 as 150.0 (or reorders keys) does not count as a change."""
-    model = contracts.ValuationSidecar if agent == "valuation" else contracts.ScoreSidecar
-    try:
-        side = model.model_validate_json(paths.sidecar(agent).read_text(encoding="utf-8"))
-    except (OSError, ValueError):   # pydantic's ValidationError is a ValueError
-        return None
-    if not paths.output(agent).exists():
-        return None
-    key = side.model_dump(mode="json", include=set(MOS_SUBSTANCE_FIELDS[agent]))
-    return "substance:" + hashlib.sha256(json.dumps(key, sort_keys=True).encode()).hexdigest()
-
-
 def input_hashes(paths: Paths, agent: str) -> dict[str, str | None]:
-    """The input versions an output is built from: file content hashes, except for mos, whose inputs are
-    fingerprinted by their key figures, so a correction that changes none of them does not make mos stale."""
-    if agent == "mos":
-        return {d: substance(paths, d) for d in DEPENDS[agent]}
+    """The input versions an output is built from: the content hashes of the files it reads."""
     return {d: sha(paths.output(d)) for d in DEPENDS[agent]}
 
 
@@ -53,7 +34,6 @@ def snapshot_reviewed(paths: Paths) -> None:
 
 @dataclass
 class Change:
-    agent: str
     rel: str                 # project-relative path of the file
     diff: str | None         # unified diff; None if unchanged, or if too long to be useful (then: re-read in full)
     changed: bool
@@ -70,11 +50,11 @@ def reviewed_changes(paths: Paths) -> list[Change] | None:
         old = old_p.read_text(encoding="utf-8", errors="replace").replace("\r\n", "\n")
         new = new_p.read_text(encoding="utf-8", errors="replace").replace("\r\n", "\n")
         if old == new:
-            out.append(Change(a, paths.rel(new_p), None, False))
+            out.append(Change(paths.rel(new_p), None, False))
             continue
         diff = "\n".join(difflib.unified_diff(old.splitlines(), new.splitlines(), f"{new_p.name} (as last reviewed)",
                                               f"{new_p.name} (now)", n=2, lineterm=""))
-        out.append(Change(a, paths.rel(new_p), diff if len(diff) <= REVIEW_DIFF_MAX_CHARS else None, True))
+        out.append(Change(paths.rel(new_p), diff if len(diff) <= REVIEW_DIFF_MAX_CHARS else None, True))
     return out
 
 
@@ -99,16 +79,16 @@ def completed_in_round(paths: Paths, agent: str, rnd: int) -> dict | None:
     inputs. Lets a resumed run skip agents that completed before their node failed. A fresh run archives the
     manifest, so every record is from the current run."""
     rec = load(paths).get(agent)
-    current = rec and rec["inputs"] == input_hashes(paths, agent) and rec["output"] == sha(paths.output(agent))
-    return rec if current and rec.get("round") == rnd else None
+    return rec if _current(paths, agent, rec) and rec.get("round") == rnd else None
 
 
 def stale_agents(paths: Paths, agents: tuple[str, ...]) -> list[str]:
     """Agents whose recorded inputs differ from the current upstream files (or that never ran)."""
     m = load(paths)
-    out = []
-    for a in agents:
-        rec = m.get(a)
-        if rec is None or rec["inputs"] != input_hashes(paths, a) or rec["output"] != sha(paths.output(a)):
-            out.append(a)
-    return out
+    return [a for a in agents if not _current(paths, a, m.get(a))]
+
+
+def _current(paths: Paths, agent: str, rec: dict | None) -> bool:
+    """The record exists and matches the current output file and the current versions of its inputs."""
+    return (rec is not None and rec["inputs"] == input_hashes(paths, agent)
+            and rec["output"] == sha(paths.output(agent)))

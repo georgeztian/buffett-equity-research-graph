@@ -18,11 +18,11 @@ Execute the workflow via the run-buffett-analysis skill, which runs the determin
 - `.claude/skills/buffett-analysis/references` — contains detailed reference materials that support and expand the Buffett analysis methodology.
 - `.claude/skills/run-buffett-analysis/` — the invocation interface; runs the Python graph
 - `.claude/settings.json` — pre-approved commands for running the graph
-- `graph/` — the LangGraph implementation of the Buffett workflow (Stage 0 SEC data pack, then five agent stages) and the single source of truth for it (routing, validation, correction loop, summary)
+- `graph/` — the LangGraph implementation of the Buffett workflow (Stage 0 SEC data pack, then six agent stages) and the single source of truth for it (routing, validation, correction loop, summary)
 - `.state/` — runtime state: the checkpoint database and detached-run logs (gitignored)
 - `.env` — per-user settings, currently the user's own SEC EDGAR contact (`SEC_USER_AGENT`, optional; `declined` records that the user chose to run without the SEC data pack); gitignored, template in `.env.example`. Never fill it with anything but what the user provides.
 - `research/<KEY>/` — intermediate research and analysis results per company (`<KEY>` = ticker, or a slug of the name); `_meta/` holds machine-readable sidecars; `_data/` holds the deterministic SEC XBRL data pack (Stage 0) shared by all agents
-- `reports/<KEY>/` — includes final investment reports intended for end users and the run summary; the final report is written only after the review stage: it incorporates analyses that passed review, and any issue still open when the correction caps are reached is flagged in it as unresolved.
+- `reports/<KEY>/` — includes final investment reports intended for end users and the run summary; the final report is written only after the review stage and the one-time audit of the margin of safety analysis: it incorporates analyses that passed review, any issue still open when the correction caps are reached is flagged in it as unresolved, and the HIGH and MEDIUM issues the MOS audit found are fixed in it (the MOS agent runs once, after the correction loop, and is never re-run).
 
 
 ## HARD RULE — project folder only

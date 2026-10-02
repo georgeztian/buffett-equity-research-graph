@@ -39,7 +39,7 @@ reports/<KEY>/   Final investment report and run summary, per company (gitignore
 requirements.txt Python dependencies
 .env.example     Template for your own SEC contact; the real .env is per user and gitignored
 CLAUDE.md        Project rules for Claude
-LICENSE          MIT license
+LICENSE          Apache 2.0 license
 ```
 
 
@@ -77,6 +77,11 @@ or directly:
 The project's `.claude/settings.json` pre-approves `python -m graph …` and the requirements install, so `/run-buffett-analysis` does not prompt for each one. The company can be given as a company name, a ticker, or both. If `claude` is not on PATH, the runner falls back to the binary bundled with the VS Code extension; set `CLAUDE_CLI_PATH` to override.
 
 While it runs (or in `.state/logs/<RUN_ID>.log` with `--detach`), the graph prints timestamped progress lines (each agent starting, being rejected and retried, completing, and the review and correction decisions). When the run finishes (or fails, or pauses at a Claude usage limit), a desktop notification says so, and you get the final report in `reports/<KEY>/final_investment_report.md` and a workflow summary in `reports/<KEY>/run_summary.md`.
+
+
+## License
+
+This project is licensed under the Apache License 2.0. See [LICENSE].
 
 
 ## Disclaimer

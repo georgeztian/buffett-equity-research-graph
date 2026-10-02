@@ -10,7 +10,7 @@ description: Evaluate sustainable competitive advantages that allow a business t
 The best businesses are those that have an "economic castle" with a wide and durable competitive advantage that cannot easily be crossed by competitors. This moat allows the business to maintain pricing power and earn high returns on capital for decades.
 
 
-## Types of Moats Buffett Recognizes
+## Types of Moats
 
 ### 1. Brand Power
 - **Description**: Consumer trust and preference for the brand. Customers actively choose the brand over alternatives. Repeat purchases, premium pricing, low customer acquisition friction, resilience during downturns.
@@ -52,7 +52,7 @@ The best businesses are those that have an "economic castle" with a wide and dur
 - **Economic Impact**: Protects market share and pricing power by limiting new entry, while dense routes and established distribution lower unit costs and make the incumbent increasingly difficult to displace.
 
 
-## How To Judge Whether The Moat Is Widening
+## How To Judge Whether the Moat Is Widening
 
 ### Positive Signs
 - The company can raise prices without materially reducing demand
@@ -71,17 +71,17 @@ The best businesses are those that have an "economic castle" with a wide and dur
 - Technological or regulatory changes weaken or eliminate the existing competitive advantage
 
 
-## How Buffett Applies the Principle
+## Evaluate Moat Strength and Durability
 
-### Investment Decisions
-1. **First Filter**: Does this business have a durable competitive advantage? Businesses with wide moats earn 20%+ ROE over a long history (check the past 10-20 years).
+### Moat Assesment
+1. **Quantitative Assessment**: Does this business have a durable competitive advantage? 
+Businesses with wide moats earn 20%+ ROE over a long history (check the past 10-20 years).
   - Collect current and historical data on operating income after taxes and book value of equity of the company.
   - Calculate ROE as operating income after taxes divided by book value of equity (do not use net income). Compute operating income after taxes exactly as defined in "Financial data collection" in `references/valuation.md`.
   - Evaluate the extent to which ROE is driven by profitability (net profit margin), operating efficiency (asset turnover), and financial leverage.
 2. **Prefer Asset-Light Businesses**: Prefer businesses that require relatively little capital (as opposed to substantial ongoing investment in tangible fixed assets and working capital) to maintain durable competitive position. More of the cash generated can be retained, returned to shareholders, or invested elsewhere.
 3. **Durability Question**: Can this advantage persist for 10-20 years?
-4. **Strength Assessment**: How wide is the moat? How hard would it be to cross?
-5. **Management**: Who is guarding the moat? Do they understand its importance?
+4. **Strength Question**: How wide is the moat? How hard would it be to cross?
 
 ### What to Avoid
 - Commodity businesses (no moat; compete on price alone)

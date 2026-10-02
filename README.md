@@ -81,7 +81,7 @@ While it runs (or in `.state/logs/<RUN_ID>.log` with `--detach`), the graph prin
 
 ## License
 
-This project is licensed under the Apache License 2.0. See [LICENSE].
+This project is licensed under the Apache License 2.0. See [LICENSE](LICENSE).
 
 
 ## Disclaimer

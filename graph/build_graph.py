@@ -22,7 +22,7 @@ def build_graph(runner: AgentRunner, root: Path = ROOT, checkpointer=None):
     g.add_node("review", wf.review)                # Stage 2
     g.add_node("correct", wf.correct)              # Stage 3  (HIGH, cap MAX_CORRECTIONS)
     g.add_node("flag_unresolved", wf.flag_unresolved)
-    g.add_node("correct_medium", wf.correct_medium)             # Stage 3b (MEDIUM, cap MAX_MEDIUM_CORRECTIONS)
+    g.add_node("correct_medium", wf.correct_medium)  # Stage 3b (MEDIUM, cap MAX_MEDIUM_CORRECTIONS)
     g.add_node("flag_unresolved_medium", wf.flag_unresolved_medium)
     g.add_node("mos", wf.mos)                      # Stage 4 (once, after the correction loop; never re-run)
     g.add_node("mos_review", wf.mos_review)        # Stage 5 (one-time audit of the MOS analysis)

@@ -1,7 +1,7 @@
 """Stage 0: deterministic SEC data pack, shared by every agent in a run.
 
-Pulls the company's annual XBRL facts from SEC EDGAR once, so the Stage 1 agents, the MOS agent, the
-reviewer and the report agent all work from the same primary-source numbers instead of each fetching (and re-deriving) them.
+Pulls the company's annual XBRL facts from SEC EDGAR once, so the Stage 1 agents, the MOS agent, the reviewer
+and the report agent all work from the same primary-source numbers instead of each fetching (and re-deriving) them.
 No model is involved. Values are copied exactly as filed; every row names its XBRL tag (different tags are never
 merged into one row); the few reference calculations show their formulas and inputs. If anything fails, the
 pack says it is unavailable and the agents research everything as before, so this stage can never fail a run.
@@ -9,6 +9,7 @@ pack says it is unavailable and the agents research everything as before, so thi
 from __future__ import annotations
 
 import gzip
+import http.client
 import json
 import re
 import time
@@ -88,7 +89,7 @@ def _get_json(url: str, ua: str) -> dict:
         except urllib.error.HTTPError as e:
             if e.code not in (429, 500, 502, 503, 504) or attempt == 2:
                 raise
-        except urllib.error.URLError:
+        except (OSError, http.client.HTTPException):   # URLError, and read timeouts / dropped connections mid-body
             if attempt == 2:
                 raise
         time.sleep(1.5 * (attempt + 1))
@@ -210,6 +211,11 @@ def _recent_filings(cik: int, subs: dict) -> list[str]:
 
 
 # ---------------------------------------------------------------------------------------------------- calculations
+def _item_tags(label: str) -> tuple[str, ...]:
+    """The candidate tags of the ITEMS row with this label."""
+    return next(tags for items in ITEMS.values() for lbl, _, _, tags in items if lbl == label)
+
+
 def _series_tag(series: dict[str, dict[str, dict]], tags: tuple[str, ...]) -> str | None:
     """The ONE tag used for a calculation input across all years: the candidate that covers the latest year,
     then the most years. Tags are never mixed across years (they can be different line items)."""
@@ -219,8 +225,8 @@ def _series_tag(series: dict[str, dict[str, dict]], tags: tuple[str, ...]) -> st
 
 def calculations(series: dict[str, dict[str, dict]], ends: list[str]) -> tuple[list[list[str]], list[str], dict]:
     """Reference CALCULATION rows (display rows, notes on which tags fed which years, machine-readable values)."""
-    pretax_tags = ITEMS["Income statement"][3][3]
-    capex_tags = ITEMS["Cash flow statement"][4][3]
+    pretax_tags = _item_tags("Pretax income")
+    capex_tags = _item_tags("Capital expenditures")
     used: dict[str, dict[str, list[str]]] = {}   # input -> tag -> [years]
     calc: dict[str, dict[str, float | None]] = {k: {} for k in ("etr", "oiat", "roe", "wc", "dwc", "fcf")}
 
@@ -367,8 +373,8 @@ def _build(paths: Paths, company: str) -> str:
                 accns.setdefault(e, set()).add(rec["accn"])
     src_lines = [f"- FY ending {e}: " + ", ".join(sorted(accns.get(e, ()))) for e in reversed(ends)]
 
-    shares = [f for f in facts.get("facts", {}).get("dei", {}).get("EntityCommonStockSharesOutstanding", {})
-              .get("units", {}).get(SHARES, [])]
+    shares = (facts.get("facts", {}).get("dei", {}).get("EntityCommonStockSharesOutstanding", {})
+              .get("units", {}).get(SHARES, []))
     shares_line = "not tagged on the cover page (e.g. several share classes); take it from the latest filing"
     if shares:
         s = max(shares, key=lambda f: (f["end"], f.get("filed", "")))

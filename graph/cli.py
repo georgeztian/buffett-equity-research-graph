@@ -1,4 +1,4 @@
-"""python -m graph --company "American Express (AXP)" [--detach] | --resume RUN_ID | --print-graph
+"""python -m graph --company "American Express (AXP)" [--detach] | --resume RUN_ID [--detach] | --print-graph
                   | --set-sec-contact "Your Name you@yourdomain.com" | --set-sec-contact declined
 """
 from __future__ import annotations

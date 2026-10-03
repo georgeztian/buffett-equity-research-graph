@@ -73,7 +73,7 @@ The best businesses are those that have an "economic castle" with a wide and dur
 
 ## Evaluate Moat Strength and Durability
 
-### Moat Assesment
+### Moat Assessment
 1. **Quantitative Assessment**: Does this business have a durable competitive advantage? 
 Businesses with wide moats earn 20%+ ROE over a long history (check the past 10-20 years).
   - Collect current and historical data on operating income after taxes and book value of equity of the company.

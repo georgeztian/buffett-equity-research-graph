@@ -39,7 +39,7 @@ ANALYSTS = RESEARCH_AGENTS + ("mos",)                   # analyses whose scores 
 # fixed by the report agent. `business` drafts the report's Company Overview, Business Model and Financial Quality
 # sections; it is reviewed, but not corrected: findings on it are owned by `report`.
 CORRECTABLE = RESEARCH_AGENTS
-ALL_AGENTS = RESEARCH_AGENTS + ("business", "mos", "review", "mos_review", "report")
+ALL_AGENTS = STAGE1_AGENTS + ("review", "mos", "mos_review", "report")   # in execution order
 
 # agent -> agents whose output files it reads (the workflow's dependency graph)
 DEPENDS: dict[str, tuple[str, ...]] = {

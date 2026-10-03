@@ -36,7 +36,7 @@ If the user gave a bare ticker in lower case (e.g. `axp`), pass it in upper case
 
 It returns immediately and prints the run id and the progress log path, `.state/logs/<RUN_ID>.log`. (On macOS/Linux use `.venv/bin/python`.) If `.venv` does not exist, first create it: `python -m venv .venv` then `.venv/Scripts/python -m pip install --no-cache-dir -r requirements.txt`.
 
-The log holds timestamped progress lines (agent started / rejected / complete, review results, correction rounds). To see how the run is going, read that log and list the files in `research/<KEY>/`. The run is over when the log ends with COMPLETE, PAUSED or FAILED (also visible in `reports/<KEY>/run_summary.md`). The graph shows the user a desktop notification when the run finishes, fails or pauses, but you are not notified, so check the log when the user asks, and do not poll in a sleep loop. If the run fails or is interrupted, completed nodes are checkpointed; resume without re-running them:
+The log holds timestamped progress lines (agent started / rejected / complete, review results, correction rounds). To see how the run is going, read that log and list the files in `research/<KEY>/`. The run is over when the log shows its final status, `Buffett analysis for ... is COMPLETE.`, `Workflow PAUSED` or `Workflow FAILED`, followed by a few lines of details (the status is also in `reports/<KEY>/run_summary.md`). The graph shows the user a desktop notification when the run finishes, fails or pauses, but you are not notified, so check the log when the user asks, and do not poll in a sleep loop. If the run fails or is interrupted, completed nodes are checkpointed; resume without re-running them:
 
 ```
 .venv/Scripts/python -m graph --resume <RUN_ID> --detach

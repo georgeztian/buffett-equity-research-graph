@@ -53,7 +53,7 @@ Collect current and historical data:
 ### Methodology
 
 **Mainly use DCF Model to Estimate Intrinsic Value**: 
-- Predict long-term sustainable "owner earnings" (used as future cash flows). Use the formula: Owner earnings = (a) reported earnings + (b) depreciation, depletion, amortization, and certain other non-cash charges - (c)CapEx - (d) change/increase in working capital.
+- Predict long-term sustainable "owner earnings" (used as future cash flows). Use the formula: Owner earnings = (a) reported earnings + (b) depreciation, depletion, amortization, and certain other non-cash charges - (c) CapEx - (d) change/increase in working capital.
     - Normalize owner earnings to remove the effects of significant, non-recurring events like litigation settlements and IPO windfalls.
     - When forecasting future owner earnings, use total capital expenditures (not maintenance CapEx) for CapEx and focus on long-term average CapEx (do not use unusually large or small CapEx).
     - When forecasting future owner earnings, normalize working-capital swings for highly seasonal businesses. Focus on the long-term average increase in working capital, rather than the absolute level of working capital.

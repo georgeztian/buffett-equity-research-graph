@@ -32,8 +32,8 @@ DATA_PACK_YEARS = 15         # fiscal years of XBRL history in the data pack
 
 RESEARCH_AGENTS = ("moat", "management", "valuation")   # Stage 1 analysts; the MOS agent's inputs
 STAGE1_AGENTS = RESEARCH_AGENTS + ("business",)         # Stage 1 (parallel)
-ANALYSTS = RESEARCH_AGENTS + ("mos",)                   # analyses whose scores the run records and the report checks
-                                                        # (business is scored too, as the report's financial quality)
+SCORED_AGENTS = STAGE1_AGENTS + ("mos",)                # analyses whose 1-10 scores the run records and the report
+                                                        # checks (business's is the report's financial quality score)
 # Owners the correction loop (Stage 3) can send a finding back to. The MOS agent runs once, after the loop
 # (Stage 4), and is never re-run: its analysis is audited once (Stage 5, `mos_review`) and the issues found are
 # fixed by the report agent. `business` drafts the report's Company Overview, Business Model and Financial Quality

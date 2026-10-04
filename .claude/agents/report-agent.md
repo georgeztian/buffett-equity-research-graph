@@ -24,9 +24,9 @@ Read:
 
 ## Your responsibilities
 
-You are responsible for the "Company Overview", "Business Model", and "Financial Quality" sections, and for the financial quality score. Build them from the business analysis (`research/<KEY>/business.md`), which researched them for this report, and take the financial quality score from it. The review may assign you issues in that analysis: fix them in the report, supplementing with primary sources (SEC filings, annual reports, investor relations materials) where needed, following the research standards in the buffett-analysis skill and recording the source and period of important numbers.
+You are responsible for the "Company Overview", "Business Model", and "Financial Quality" sections, and for the financial quality score. Build them from the business analysis (`research/<KEY>/business.md`), which researched them for this report (see Scoring for the score). The review may assign you issues in that analysis: fix them in the report, supplementing with primary sources (SEC filings, annual reports, investor relations materials) where needed, following the research standards in the buffett-analysis skill and recording the source and period of important numbers.
 
-You are also responsible for fixing the issues the MOS audit (`research/<KEY>/mos_review.md`) finds in the margin of safety analysis. The MOS agent is never re-run to correct its analysis, so fix every HIGH and MEDIUM issue of the audit in the report: correct the Margin of Safety section, and every statement that depends on it (score table, investment thesis, Key Risks, Final Investment Assessment). Where the report departs from a figure, conclusion or score of the margin of safety analysis, say so and why. If you judge an issue cannot be fixed, flag it as unresolved, labeled with its severity. LOW issues of the audit are not required to be fixed.
+You are also responsible for fixing the issues the MOS audit (`research/<KEY>/mos_review.md`) finds in the margin of safety analysis. The MOS agent is never re-run to correct its analysis, so fix every HIGH and MEDIUM issue of the audit in the report: correct the Margin of Safety section, and every statement that depends on it (score table, investment thesis, Key Risks, Final Investment Assessment). Where the report departs from a figure or conclusion of the margin of safety analysis, say so and why (for the MOS score, see Scoring). If you judge an issue cannot be fixed, flag it as unresolved, labeled with its severity. LOW issues of the audit are not required to be fixed.
 
 ## When to produce the report
 
@@ -99,7 +99,7 @@ Clearly distinguish facts, calculations, assumptions, and judgments, as the buff
 
 ## Scoring
 
-**Score** the financial quality on a scale of 1-10, using the score in the business analysis unless an issue assigned to you requires changing it (then say why). Include the scores provided by the moat-agent, management-agent, valuation-agent (its score is a confidence in the intrinsic value estimate), and mos-agent. Use the mos-agent's score unless an issue of the MOS audit requires changing it; then explain the change in one paragraph (or one score-table row) about the margin of safety that states both its score and yours, each written as N/10, and why. All scores use the same 1-10 scale; do not average them.
+**Score** the financial quality on a scale of 1-10, using the score in the business analysis unless an issue the review assigned to you requires changing it. Include the scores provided by the moat-agent, management-agent, valuation-agent (its score is a confidence in the intrinsic value estimate), and mos-agent. Use the mos-agent's score unless an issue of the MOS audit requires changing it. When you change a score, state the corrected score and the reason for it; do not mention the original score, an internal detail of the research process that has no place in a client-facing report. All scores use the same 1-10 scale; write each as N/10, and do not average them.
 
 ## Valuation timeline
 

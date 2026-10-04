@@ -24,8 +24,8 @@ class GraphState(TypedDict, total=False):
     unresolved_medium: list[dict[str, Any]]          # set by flag_unresolved (no MEDIUM-only round follows an open
                                                      # HIGH) and by flag_unresolved_medium
     mos_findings: list[dict[str, Any]]               # findings of the one-time MOS audit (fixed by the report agent)
-    reported_scores: dict[str, int]                  # scores as the report states them (MOS may differ, see report)
-    mos_score_change: dict[str, Any] | None          # the report's recorded MOS score change, if any (validated)
-    scores: Annotated[dict[str, int], merge_dicts]
+    reported_scores: dict[str, int]                  # scores as the report states them (MOS, business may differ)
+    score_changes: dict[str, dict[str, Any]]         # "mos" / "business" -> the report's recorded change (validated)
+    scores: Annotated[dict[str, int], merge_dicts]   # the analyses' own scores (business: financial quality)
     status: Annotated[dict[str, dict], merge_dicts]  # agent -> execution record
     history: Annotated[list[str], operator.add]      # routing / lifecycle events

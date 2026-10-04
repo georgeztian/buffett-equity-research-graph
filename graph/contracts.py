@@ -66,7 +66,7 @@ class Counts(BaseModel):
 
 class ReviewSidecar(BaseModel):
     """Only `findings` is authoritative. Severity counts are derived from it in code (never asked of the model),
-    so they cannot disagree with the findings; any extra `counts` key in the sidecar is ignored."""
+    so they cannot disagree with the findings."""
     findings: list[Finding]
 
     @model_validator(mode="after")
@@ -80,12 +80,13 @@ class ReviewSidecar(BaseModel):
         return Counts(**{s.lower(): sum(f.severity == s for f in self.findings) for s in ("HIGH", "MEDIUM", "LOW")})
 
 
-class MosScoreChange(BaseModel):
-    """Why the report uses a different MOS score than the MOS analysis: allowed only when issues of the MOS audit
-    require it, since the MOS agent is never re-run to correct its own score."""
-    original: int = Field(ge=1, le=10)            # the MOS analysis's score
+class ScoreChange(BaseModel):
+    """Why the report uses a different score than the analysis it comes from. Allowed only for the two analyses that
+    are never re-run to correct their own score: the MOS analysis (when issues of the MOS audit require it) and the
+    business analysis's financial quality score (when issues owned by the report require it)."""
+    original: int = Field(ge=1, le=10)            # the analysis's score
     corrected: int = Field(ge=1, le=10)           # the score the report uses
-    finding_ids: list[str] = Field(min_length=1)  # the MOS audit finding(s) that require the change
+    finding_ids: list[str] = Field(min_length=1)  # the finding(s) that require the change
     reason: str = Field(min_length=20)
 
 
@@ -94,11 +95,12 @@ class ReportSidecar(BaseModel):
     scores_reported: dict[str, int]
     share_price: float = Field(gt=0)   # the report's share price reference: must be the valuation's
     price_date: date
-    mos_score_change: MosScoreChange | None = None   # set only when scores_reported["mos"] differs from the MOS's
+    mos_score_change: ScoreChange | None = None           # set only when scores_reported["mos"] differs from the MOS's
+    financial_quality_change: ScoreChange | None = None   # set only when financial_quality_score differs from business's
 
 
 SUMMARY_LINE = re.compile(
-    r"^\W*Summary:\s*(\d+)\s+HIGH\b[^0-9\n]{0,40}?(\d+)\s+MEDIUM\b[^0-9\n]{0,40}?(\d+)\s+LOW\b",
+    r"^\W*Summary:[\s*_]*(\d+)[*_]*\s+HIGH\b[^0-9\n]{0,40}?(\d+)[*_]*\s+MEDIUM\b[^0-9\n]{0,40}?(\d+)[*_]*\s+LOW\b",
     re.IGNORECASE | re.MULTILINE,
 )
 

@@ -1,5 +1,5 @@
-"""Builds the system and user prompts. Agent/skill files are read verbatim; a runtime contract
-is appended so the agent files themselves never need to change."""
+"""Builds the system and user prompts. Agent/skill files are read verbatim and define each role; the appended
+runtime contract adds only what is specific to the run (paths, sidecar schema, round state, mechanical checks)."""
 from __future__ import annotations
 
 import json
@@ -7,8 +7,8 @@ import re
 from datetime import date
 from pathlib import Path
 
-from .config import (AGENT_FILE, ANALYSTS, CORRECTABLE, DEPENDS, MAX_CORRECTIONS, MAX_MEDIUM_CORRECTIONS,
-                     PRICE_MAX_AGE_DAYS, Paths)
+from .config import (AGENT_FILE, CORRECTABLE, DEPENDS, MAX_CORRECTIONS, MAX_MEDIUM_CORRECTIONS, PRICE_MAX_AGE_DAYS,
+                     SCORED_AGENTS, Paths)
 
 SKILL_DIR = Path(".claude/skills/buffett-analysis")
 
@@ -93,7 +93,7 @@ def _sidecar_schema(agent: str) -> str:
                 'within its low-high range>, '
                 '"margin_of_safety_pct": <(intrinsic_value_per_share - share_price) / intrinsic_value_per_share * 100, '
                 'negative if the price is above it>}')
-    if agent in ANALYSTS or agent == "business":
+    if agent in SCORED_AGENTS:
         return ('{"score": <integer 1-10, the same score stated in your markdown file>, '
                 '"summary": "<one sentence>"}')
     if agent in ("review", "mos_review"):
@@ -103,14 +103,15 @@ def _sidecar_schema(agent: str) -> str:
                           "owner": "moat|management|valuation|report" if agent == "review" else "mos",
                           "required_correction": "..."}],
         }, indent=2)
-    return ('{"financial_quality_score": <integer 1-10>, "scores_reported": '
+    return ('{"financial_quality_score": <integer 1-10, the financial quality score the report uses>, '
+            '"scores_reported": '
             '{"moat": <int>, "management": <int>, "valuation": <int>, "mos": <int, the MOS score the report uses>}, '
             '"share_price": <the report\'s share price reference: exactly the valuation sidecar\'s share_price>, '
             '"price_date": "<exactly the valuation sidecar\'s price_date>", '
-            '"mos_score_change": null}\n'
-            'Set "mos_score_change" only when issues of the MOS audit require a MOS score different from the margin '
-            'of safety analysis\'s, as {"original": <its score>, "corrected": <the score you use>, '
-            '"finding_ids": ["<the MOS audit finding id(s) requiring it>"], "reason": "<why, in a sentence>"}.')
+            '"mos_score_change": null, "financial_quality_change": null}\n'
+            'Leave "mos_score_change" and "financial_quality_change" null unless the report changes that score; a '
+            'change is recorded as {"original": <the analysis\'s score>, "corrected": <the score you use>, '
+            '"finding_ids": ["<the id(s) of the finding(s) requiring it>"], "reason": "<why, in a sentence>"}.')
 
 
 def system_prompt(root: Path, paths: Paths, agent: str, company: str, iteration: int, *,
@@ -138,17 +139,17 @@ def system_prompt(root: Path, paths: Paths, agent: str, company: str, iteration:
         "containing ONLY valid JSON of this shape:",
         _sidecar_schema(agent),
     ]
-    if agent in ANALYSTS or agent == "business":
+    if agent in SCORED_AGENTS:
         contract.append(
-            "- Label substantive statements in your markdown as FACT, CALCULATION, ASSUMPTION or JUDGMENT, "
-            "record source and period for key numbers, and state your 1-10 score explicitly under the word 'Score'.")
+            "- Label substantive statements in your markdown as FACT, CALCULATION, ASSUMPTION or JUDGMENT, and "
+            "state your 1-10 score explicitly under the word 'Score'.")
         contract.append("- The workflow checks your files mechanically before the "
                         + ("MOS audit" if agent == "mos" else "review") + ": the sidecar must agree "
                         "with the markdown" + (f", and the share price must be current (dated within {PRICE_MAX_AGE_DAYS} days)"
                                                if agent == "valuation"
                                                else ", and it must use the valuation's exact price and date and an "
                                                "intrinsic value within its range" if agent == "mos" else "") + ".")
-        cost = ("a fix in the final report, as the MOS agent is not re-run" if agent == "mos"
+        cost = ("a fix in the final report" if agent == "mos"
                 else "the report agent's time" if agent == "business"
                 else "a correction run and a re-review")
         contract.append("- SELF-CHECK before you save: the independent reviewer will audit your file against the "
@@ -173,24 +174,13 @@ def system_prompt(root: Path, paths: Paths, agent: str, company: str, iteration:
             (f"- This is the re-review after correction round {iteration}." if iteration else
              "- This is the initial review, before any correction round."),
             f"- HIGH-severity correction rounds already performed: {high_iteration} of {MAX_CORRECTIONS}.",
-            f"- MEDIUM-only correction rounds already performed: {medium_iteration} of {MAX_MEDIUM_CORRECTIONS} "
-            "(open MEDIUM findings are also sent back in every HIGH round; MEDIUM-only rounds start once no "
-            "correctable HIGH finding remains, and none runs if HIGH correction stops with a HIGH finding still "
-            "open; LOW findings are never corrected).",
+            f"- MEDIUM-only correction rounds already performed: {medium_iteration} of {MAX_MEDIUM_CORRECTIONS}.",
             "- Give every finding a unique id (R1, R2, ...) and write that id next to the finding in review.md.",
             "- Set `owner` to the single agent whose file must change: moat, management, valuation, "
-            "or `report` if only the final report can fix it (e.g. presentation, or anything in business.md: the "
-            "report agent turns it into the Company Overview, Business Model and Financial Quality sections).",
-            "- The margin of safety analysis is not part of this review: it is written only after the correction "
-            "stage ends, and you audit it then in a separate, one-time pass. Do not audit it or assign issues to "
-            "`mos` now.",
-            "- Also audit compliance with the project data rules above (for example, an idea attributed to Buffett "
-            "without supporting evidence).",
+            "or `report` if only the final report can fix it (e.g. presentation, or anything in business.md).",
+            "- Also audit compliance with the project data rules above.",
             "- The sidecar `findings` list holds ONLY issues that are open after this review, at every severity. "
-            "An issue you verified as fixed is reported as fixed in review.md and left out of the sidecar: the "
-            "workflow sends HIGH and MEDIUM findings in the sidecar to their owner for correction (findings owned by "
-            "`report` go to the report agent).",
-            "- The workflow counts the findings itself and decides what is corrected; you only audit and classify.",
+            "An issue you verified as fixed is reported as fixed in review.md and left out of the sidecar.",
             "- The LAST line of review.md must be exactly `Summary: H HIGH, M MEDIUM, L LOW` with real numbers: "
             "H, M and L equal the number of sidecar findings of each severity.",
         ]
@@ -205,13 +195,10 @@ def system_prompt(root: Path, paths: Paths, agent: str, company: str, iteration:
                             "if a HIGH round still runs (it carries the open MEDIUM findings); otherwise it goes to "
                             "the final report flagged as unresolved.")
     if agent == "mos_review":
-        mos_rel, rev_rel = paths.rel(paths.output("mos")), paths.rel(paths.output("review"))
         contract += [
             "- This is your one-time MOS AUDIT pass, not the main review: audit only the margin of safety analysis "
-            f"`{mos_rel}`. The moat, management and valuation analyses have finished their review and correction "
-            f"stage; read them (and `{rev_rel}`, the final main review) only as the MOS analysis's inputs. Do not "
-            f"re-audit them, and do not re-report the issues still open in `{rev_rel}`; record an upstream problem "
-            "only where the MOS analysis itself handles it wrongly.",
+            f"`{paths.rel(paths.output('mos'))}`. Record an upstream problem only where the MOS analysis itself "
+            "handles it wrongly.",
             "- In particular check: that the price, its date and the intrinsic value used are the valuation's, and the "
             "margin of safety is computed correctly from them; that the required discount is chosen as "
             "`margin_of_safety.md` prescribes (every condition considered, the largest applicable discount applied, "
@@ -219,25 +206,21 @@ def system_prompt(root: Path, paths: Paths, agent: str, company: str, iteration:
             "issues left open, are reflected correctly; the score; and compliance with the project data rules.",
             "- Give every finding a unique id (M1, M2, ...) and write that id next to the finding in the audit file. "
             "Set `owner` to `mos` for every finding.",
-            "- The MOS agent is never re-run. HIGH and MEDIUM findings go to the report agent, which fixes them in "
-            "the final report (its Margin of Safety section, the MOS score and everything that depends on them); "
-            "LOW findings are recorded only. Classify severity on the merits.",
             "- The sidecar `findings` list holds every issue you found, at every severity.",
             f"- The LAST line of `{paths.rel(paths.output('mos_review'))}` must be exactly "
             "`Summary: H HIGH, M MEDIUM, L LOW` with real numbers: H, M and L equal the number of sidecar findings "
             "of each severity.",
         ]
     if agent == "report":
-        contract.append("- Use exactly the upstream scores given in the task for `scores_reported`; do not average "
-                        "them. The one exception is the MOS score, when an issue of the MOS audit requires changing "
-                        "it: then report the score you use, record the change in the sidecar's `mos_score_change`, "
-                        "and explain it in the report in one paragraph (or one score-table row) that refers to the "
-                        "margin of safety and states both the margin of safety analysis's score and yours, each "
-                        "written as `N/10`, with the reason (the workflow checks all of this mechanically).")
+        contract.append("- `scores_reported` and `financial_quality_score` are exactly the scores given in the task, "
+                        "except a score your instructions allow you to change: the MOS score for an issue of the MOS "
+                        "audit, the financial quality score for an issue owned by the report. Record such a change in "
+                        "the sidecar; the original score is kept there, not in the report.")
         contract.append("- The share price reference and every mention of the current price use exactly the "
                         "valuation's share price and date; the workflow checks this mechanically.")
-        contract.append("- `financial_quality_score` is the score in the business analysis; change it only where an "
-                        "issue owned by the report requires it, and then say in the report why.")
+        contract.append("- The workflow also checks mechanically that the report states the financial quality score "
+                        "it uses, and a changed MOS score, as `N/10` in a paragraph or score-table row that names "
+                        "financial quality or the margin of safety, respectively.")
     sections = [
         load_agent_body(root, agent),
         "## Buffett analysis skill (already loaded; follow it)\n" + load_skill_body(root),
@@ -283,11 +266,9 @@ def user_prompt(paths: Paths, agent: str, company: str, *, findings=(), scores: 
     if agent == "mos":
         if upstream_open:
             parts.append("\n## UPSTREAM ISSUES LEFT OPEN BY THE REVIEW\n"
-                         "The moat, management and valuation analyses have finished their review and correction stage "
-                         "with these issues still open (they are flagged as unresolved in the final report). Take "
-                         "them into account where they bear on the margin of safety, for example on the confidence "
-                         "in the intrinsic value estimate and the discount required, and say how:\n"
-                         + _fmt_findings(upstream_open))
+                         "These issues in the moat, management and valuation analyses are still open after the review "
+                         "and correction stage (the final report flags them as unresolved). Take them into account as "
+                         "your instructions describe:\n" + _fmt_findings(upstream_open))
         else:
             parts.append("\nThe moat, management and valuation analyses passed review with no HIGH or MEDIUM issue "
                          "left open.")
@@ -303,23 +284,25 @@ def user_prompt(paths: Paths, agent: str, company: str, *, findings=(), scores: 
                          "open; give each new issue a new id that no earlier finding has used.\n"
                          + _fmt_findings(previous_findings))
     if agent == "report":
-        parts.append("\nUpstream scores (use exactly; the MOS score may change only as described below): "
-                     + json.dumps(scores or {}))
+        upstream = dict(scores or {})
+        fq = upstream.pop("business", None)
+        parts.append("\nUpstream scores for `scores_reported`: " + json.dumps(upstream))
+        if fq is not None:
+            parts.append(f"Financial quality score (the business analysis's): {fq}/10. Use it as "
+                         "`financial_quality_score`" + (" unless an issue owned by the report, listed below, requires "
+                                                        "changing it." if report_notes else
+                                                        "; no issue owned by the report was found, so it does not "
+                                                        "change."))
         if unresolved:
             parts.append("\n## UNRESOLVED ISSUES (left open by the correction loop)\n"
-                         "Use your best judgment to resolve each, and clearly flag every one as an unresolved "
+                         "Address each with your best judgment, and clearly flag every one as an unresolved "
                          "issue in the report, labeled with its severity (each item below states HIGH or MEDIUM):\n"
                          + _fmt_findings(unresolved))
         if report_notes:
             parts.append("\n## Issues owned by the report (you must address these)\n" + _fmt_findings(report_notes))
         if mos_fixes:
-            parts.append("\n## Issues found by the audit of the margin of safety analysis (you must fix these)\n"
-                         "The margin of safety analysis is never re-run, so fix each issue below in the report: "
-                         "correct the Margin of Safety section, the MOS score where an issue requires it, and every "
-                         "statement that depends on them (score table, investment thesis, Key Risks, Final Investment "
-                         "Assessment). Where the report departs from a figure, conclusion or score of the margin of "
-                         "safety analysis, say so and why. If you judge an issue cannot be fixed, flag it as an "
-                         "unresolved issue labeled with its severity.\n" + _fmt_findings(mos_fixes))
+            parts.append("\n## Issues found by the audit of the margin of safety analysis (fix these in the report, "
+                         "as your instructions describe)\n" + _fmt_findings(mos_fixes))
         else:
             parts.append("\nThe audit of the margin of safety analysis found no HIGH or MEDIUM issue: report the MOS "
                          "score exactly as given.")

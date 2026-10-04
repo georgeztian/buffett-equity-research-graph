@@ -40,11 +40,25 @@ Produce an audit report. For every problem provide:
 - Severity
 - Required correction
 
-Classify severity:
+Classify severity (**HIGH**, **MEDIUM**, or **LOW**) by impact: what would change if the issue were corrected? Estimate the impact from the figures already in the files; do not rebuild the valuation or rerun calculations to size an issue. If an issue fits more than one level, use the highest. Classify on the evidence; do not raise a severity to be safe.
 
-- HIGH
-- MEDIUM
-- LOW
+**HIGH**: correcting it would change a conclusion. Any one of these is enough:
+- A 1-10 score (moat, management, valuation, financial quality or MOS) would move by 2 or more points.
+- The low, base or high intrinsic value per share would move by 10% or more.
+- The margin of safety would change sign (price vs. base intrinsic value) or, in the MOS audit, cross the discount `margin_of_safety.md` requires.
+- A fact or input that a score or the valuation rests on is false, invented, missing, or unsourced.
+- A structural valuation error, whatever its size: double counting; mixing per-share and total figures; terminal growth at or above the discount rate; discounting anything other than owner earnings as `valuation.md` defines them; a discount rate outside 6%-9%; an ROE not computed as the references define it, where a score uses it.
+
+**MEDIUM**: correcting it would weaken a supporting argument but not change a conclusion:
+- A score would move by 1 point, or the base intrinsic value by 5% to under 10%.
+- An unsupported or weakly sourced claim (including an idea attributed to Buffett without evidence) used in the reasoning but not decisive for a score.
+- A figure that feeds a calculation or score and differs, beyond rounding, within a file or between files.
+- A false statement of fact, even one no conclusion relies on.
+
+**LOW**: none of the above applies, for example:
+- Effect on the base intrinsic value under 5%, and no score change.
+- Wording, presentation, list structure, citation format, or an imprecise label.
+- A rounding difference, or a stale figure that no calculation or score uses.
 
 You audit in two kinds of pass; the workflow tells you which one you are in.
 
@@ -58,13 +72,13 @@ Save your review to:
 Record every issue that is open after your review, at every severity. You audit and classify; the workflow decides what gets corrected:
 
 - HIGH issues in the analyses (moat, management, valuation) are sent back for correction first, up to the workflow's HIGH cap of correction rounds. Every open MEDIUM issue in the analyses is sent back in the same round, so all affected agents correct their files in parallel.
-- Once no such HIGH issue remains, the MEDIUM issues still open are sent back in MEDIUM-only rounds, up to the workflow's own, shorter MEDIUM cap. Classify severity on the merits either way.
+- Once no such HIGH issue remains, the MEDIUM issues still open are sent back in MEDIUM-only rounds, up to the workflow's own, shorter MEDIUM cap.
 - LOW issues are recorded for the record and never corrected.
 - An issue still open after being sent back for correction twice is not sent back again.
 - An issue still open when its cap is reached or that is no longer sent back (including every MEDIUM issue when HIGH issues remain open) goes to the final report flagged as unresolved.
 - Issues in the business analysis (`research/<KEY>/business.md`) are not sent back: they go to the report agent, which builds the report's Company Overview, Business Model and Financial Quality sections from it.
 
-On a re-review, state for each previously reported issue whether it is now fixed, and record only the issues still open.
+On a re-review, state for each previously reported issue whether it is now fixed, and record only the issues still open, keeping each one's severity unless the changes alter its impact.
 
 ## MOS audit (once, after the correction loop)
 

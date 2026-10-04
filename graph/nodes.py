@@ -10,8 +10,8 @@ from pathlib import Path
 
 from . import contracts, datapack, manifest, prompts, routing, validators
 from .agent_runner import AgentRunner, AgentTask, Usage
-from .config import (AGENT_FILE, ALL_AGENTS, ANALYSTS, CORRECTABLE, DEPENDS, MAX_CORRECTIONS, MAX_FINDING_ATTEMPTS,
-                     MAX_MEDIUM_CORRECTIONS, MAX_VALIDATION_RETRIES, STAGE1_AGENTS, Paths)
+from .config import (AGENT_FILE, ALL_AGENTS, CORRECTABLE, DEPENDS, MAX_CORRECTIONS, MAX_FINDING_ATTEMPTS,
+                     MAX_MEDIUM_CORRECTIONS, MAX_VALIDATION_RETRIES, SCORED_AGENTS, STAGE1_AGENTS, Paths)
 from .notify import notify
 from .summary import write_summary
 
@@ -47,6 +47,13 @@ def _unresolved(state: dict) -> list[contracts.Finding]:
     with a correctable HIGH or MEDIUM finding open). Passed to the MOS agent and to the report."""
     return [contracts.Finding.model_validate(f)
             for f in state.get("unresolved_high", []) + state.get("unresolved_medium", [])]
+
+
+def _require_fresh_inputs(paths: Paths, agent: str) -> None:
+    """Before review, mos, mos_review and report: refuse to run on an upstream file built from outdated inputs."""
+    stale = validators.check_fresh_inputs(paths, agent)
+    if stale:
+        raise NodeFailure(f"{agent} blocked, stale inputs: {stale}", agent)
 
 
 def _merge(*updates: dict) -> dict:
@@ -103,7 +110,7 @@ class Workflow:
         use = Usage()
         vkw = {"scores": state.get("scores"), "unresolved": ctx.get("unresolved") or [],
                "previous_ids": [f.id for f in ctx.get("previous_findings") or ()],
-               "mos_fixes": ctx.get("mos_fixes") or []}
+               "mos_fixes": ctx.get("mos_fixes") or [], "report_notes": ctx.get("report_notes") or []}
         errors, attempts, started = [], 0, time.time()
         async with AsyncExitStack() as stack:
             session = None
@@ -159,7 +166,7 @@ class Workflow:
                                **Usage.accumulate(prior, this)}},
             "history": [event],
         }
-        if agent in ANALYSTS:
+        if agent in SCORED_AGENTS:
             update["scores"] = {agent: contracts.load_score(paths.sidecar(agent)).score}
         return update
 
@@ -198,7 +205,7 @@ class Workflow:
         paths.reports_dir.mkdir(parents=True, exist_ok=True)
         return {"iteration": 0, "high_iteration": 0, "medium_iteration": 0, "findings": [], "finding_attempts": {},
                 "unresolved_high": [], "unresolved_medium": [], "mos_findings": [], "reported_scores": {},
-                "mos_score_change": None,
+                "score_changes": {},
                 "history": [_event(f"input validated for {state['company']} -> key {state['key']}"
                                    + (f"; archived {len(old)} earlier files" if old else ""))]}
 
@@ -230,9 +237,7 @@ class Workflow:
 
     async def review(self, state: dict) -> dict:
         paths = self.paths(state)
-        stale = validators.check_fresh_inputs(paths, "review")
-        if stale:
-            raise NodeFailure(f"review blocked, stale inputs: {stale}", "review")
+        _require_fresh_inputs(paths, "review")
         it = state.get("iteration", 0)
         if it and not manifest.completed_in_round(paths, "review", it) and not manifest.stale_agents(paths, ("review",)):
             # No file the reviewer reads changed in this round: a re-review could only repeat the last one.
@@ -323,19 +328,14 @@ class Workflow:
         """Stage 4: the margin of safety analysis, run once on the final upstream analyses after the correction loop
         has ended. It is never re-run: the one-time MOS audit's issues are fixed by the report agent. The upstream
         issues the loop left open are passed on, so the analysis can take them into account."""
-        paths = self.paths(state)
-        stale = validators.check_fresh_inputs(paths, "mos")
-        if stale:
-            raise NodeFailure(f"mos blocked, stale inputs: {stale}", "mos")
+        _require_fresh_inputs(self.paths(state), "mos")
         return await self._execute("mos", state, upstream_open=_unresolved(state))
 
     async def mos_review(self, state: dict) -> dict:
         """Stage 5: the reviewer's one-time audit of the MOS analysis. Its findings never loop back: the HIGH and
         MEDIUM ones go to the report agent, which fixes them in the report."""
         paths = self.paths(state)
-        stale = validators.check_fresh_inputs(paths, "mos_review")
-        if stale:
-            raise NodeFailure(f"mos_review blocked, stale inputs: {stale}", "mos_review")
+        _require_fresh_inputs(paths, "mos_review")
         upd = await self._execute("mos_review", state)
         rev = contracts.load_review(paths.sidecar("mos_review"))
         c = rev.counts
@@ -346,17 +346,16 @@ class Workflow:
 
     async def report(self, state: dict) -> dict:
         paths = self.paths(state)
-        stale = validators.check_fresh_inputs(paths, "report")
-        if stale:
-            raise NodeFailure(f"report blocked, stale inputs: {stale}", "report")
+        _require_fresh_inputs(paths, "report")
         notes = [f for sev in ("HIGH", "MEDIUM") for f in routing.report_owned(state.get("findings", []), sev)]
         mos_fixes = [f for f in (contracts.Finding.model_validate(x) for x in state.get("mos_findings", []))
                      if f.severity in ("HIGH", "MEDIUM")]
         upd = await self._execute("report", state, unresolved=_unresolved(state), report_notes=notes,
                                   mos_fixes=mos_fixes)
         rep = contracts.load_report(paths.sidecar("report"))
-        upd["reported_scores"] = rep.scores_reported
-        upd["mos_score_change"] = rep.mos_score_change.model_dump() if rep.mos_score_change else None
+        upd["reported_scores"] = {**rep.scores_reported, "business": rep.financial_quality_score}
+        upd["score_changes"] = {k: c.model_dump() for k, c in (("mos", rep.mos_score_change),
+                                                               ("business", rep.financial_quality_change)) if c}
         return upd
 
     async def finalize(self, state: dict) -> dict:

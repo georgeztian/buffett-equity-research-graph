@@ -53,7 +53,7 @@ def build_summary(paths: Paths, state: dict, error: str | None = None, paused: b
         "total_correction_iterations": state.get("iteration", 0),
         "scores": state.get("scores", {}),
         "reported_scores": state.get("reported_scores", {}),
-        "mos_score_change": state.get("mos_score_change"),
+        "score_changes": state.get("score_changes", {}),
         "unresolved_high_issues": state.get("unresolved_high", []),
         "unresolved_medium_issues": state.get("unresolved_medium", []),
         "mos_audit_issues": state.get("mos_findings", []),
@@ -62,6 +62,10 @@ def build_summary(paths: Paths, state: dict, error: str | None = None, paused: b
         "final_report": paths.rel(report) if report_done else None,
         "history": state.get("history", []),
     }
+
+
+_SCORE_LABEL = {"business": "financial quality"}
+_SCORE_SOURCE = {"mos": "MOS agent", "business": "business agent"}
 
 
 def render_markdown(s: dict) -> str:
@@ -102,27 +106,22 @@ def render_markdown(s: dict) -> str:
                   f"{ut.get('input_tokens', 0) + ut.get('cache_read_input_tokens', 0) + ut.get('cache_creation_input_tokens', 0):,} "
                   "input tokens."]
     lines += ["", "## Scores (1-10)", ""]
-    reported, change = s.get("reported_scores") or {}, s.get("mos_score_change")
+    reported, changes = s.get("reported_scores") or {}, s.get("score_changes") or {}
     for k, v in s["scores"].items():
         r = reported.get(k)
-        line = f"- {k}: {v}"
-        if r is not None and r != v:   # only the MOS score can differ, and only with a validated recorded change
-            line += f" (MOS agent) -> {r} in the report, after the MOS audit"
-            if change:
-                line += f" (issue(s) {', '.join(change['finding_ids'])}: {change['reason']})"
+        line = f"- {_SCORE_LABEL.get(k, k)}: {v}"
+        if r is not None and r != v:   # only MOS and financial quality can differ, with a validated recorded change
+            line += f" ({_SCORE_SOURCE.get(k, k)}) -> {r} in the report"
+            if k == "mos":
+                line += ", after the MOS audit"
+            if changes.get(k):
+                line += f" (issue(s) {', '.join(changes[k]['finding_ids'])}: {changes[k]['reason']})"
         lines.append(line)
-    lines += ["", "## Unresolved HIGH-severity issues", ""]
-    if s["unresolved_high_issues"]:
-        for f in s["unresolved_high_issues"]:
-            lines.append(f"- **[{f['id']}]** ({f['owner']}) {f['problem']} — required: {f['required_correction']}")
-    else:
-        lines.append("None.")
-    lines += ["", "## Unresolved MEDIUM-severity issues", ""]
-    if s["unresolved_medium_issues"]:
-        for f in s["unresolved_medium_issues"]:
-            lines.append(f"- **[{f['id']}]** ({f['owner']}) {f['problem']} — required: {f['required_correction']}")
-    else:
-        lines.append("None.")
+    for sev in ("HIGH", "MEDIUM"):
+        issues = s[f"unresolved_{sev.lower()}_issues"]
+        lines += ["", f"## Unresolved {sev}-severity issues", ""]
+        lines += [f"- **[{f['id']}]** ({f['owner']}) {f['problem']} — required: {f['required_correction']}"
+                  for f in issues] or ["None."]
     lines += ["", "## MOS audit issues (the MOS agent is not re-run; HIGH and MEDIUM are fixed in the report)", ""]
     if s.get("mos_audit_issues"):
         for f in s["mos_audit_issues"]:

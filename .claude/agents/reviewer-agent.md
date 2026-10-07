@@ -37,10 +37,11 @@ Produce an audit report. For every problem provide:
 
 - Problem
 - Evidence
+- Impact
 - Severity
 - Required correction
 
-Classify severity (**HIGH**, **MEDIUM**, or **LOW**) by impact: what would change if the issue were corrected? Estimate the impact from the figures already in the files; do not rebuild the valuation or rerun calculations to size an issue. If an issue fits more than one level, use the highest. Classify on the evidence; do not raise a severity to be safe.
+Classify severity (**HIGH**, **MEDIUM**, or **LOW**) by impact: what would change if the issue were corrected? Estimate the impact from the figures already in the files; do not rebuild the valuation or rerun calculations to size an issue. If an issue fits more than one level, use the highest. Do not raise a severity to be safe.
 
 **HIGH**: correcting it would change a conclusion. Any one of these is enough:
 - A 1-10 score (moat, management, valuation, financial quality or MOS) would move by 1 or more points.
@@ -55,7 +56,7 @@ Classify severity (**HIGH**, **MEDIUM**, or **LOW**) by impact: what would chang
 - A false statement of fact, even one no conclusion relies on.
 
 **LOW**: none of the above applies, for example:
-- Effect on the base intrinsic value under 5%, and no score change.
+- Effect on the low, base or high intrinsic value under 5%, and no score change.
 - Wording, presentation, list structure, citation format, or an imprecise label.
 - A rounding difference, or a stale figure that no calculation or score uses.
 

@@ -43,14 +43,13 @@ Produce an audit report. For every problem provide:
 Classify severity (**HIGH**, **MEDIUM**, or **LOW**) by impact: what would change if the issue were corrected? Estimate the impact from the figures already in the files; do not rebuild the valuation or rerun calculations to size an issue. If an issue fits more than one level, use the highest. Classify on the evidence; do not raise a severity to be safe.
 
 **HIGH**: correcting it would change a conclusion. Any one of these is enough:
-- A 1-10 score (moat, management, valuation, financial quality or MOS) would move by 2 or more points.
-- The low, base or high intrinsic value per share would move by 10% or more.
+- A 1-10 score (moat, management, valuation, financial quality or MOS) would move by 1 or more points.
+- The low, base or high intrinsic value per share would move by 5% or more.
 - The margin of safety would change sign (price vs. base intrinsic value) or, in the MOS audit, cross the discount `margin_of_safety.md` requires.
 - A fact or input that a score or the valuation rests on is false, invented, missing, or unsourced.
 - A structural valuation error, whatever its size: double counting; mixing per-share and total figures; terminal growth at or above the discount rate; discounting anything other than owner earnings as `valuation.md` defines them; a discount rate outside 6%-9%; an ROE not computed as the references define it, where a score uses it.
 
 **MEDIUM**: correcting it would weaken a supporting argument but not change a conclusion:
-- A score would move by 1 point, or the base intrinsic value by 5% to under 10%.
 - An unsupported or weakly sourced claim (including an idea attributed to Buffett without evidence) used in the reasoning but not decisive for a score.
 - A figure that feeds a calculation or score and differs, beyond rounding, within a file or between files.
 - A false statement of fact, even one no conclusion relies on.

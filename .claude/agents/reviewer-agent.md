@@ -35,10 +35,12 @@ Check and audit:
 
 Produce an audit report. For every problem provide:
 
+- ID
 - Problem
 - Evidence
 - Impact
 - Severity
+- Owner: the single agent whose file must change (see your pass below)
 - Required correction
 
 Classify severity (**HIGH**, **MEDIUM**, or **LOW**) by impact: what would change if the issue were corrected? Estimate the impact from the figures already in the files; do not rebuild the valuation or rerun calculations to size an issue. If an issue fits more than one level, use the highest. Do not raise a severity to be safe.
@@ -49,15 +51,17 @@ Classify severity (**HIGH**, **MEDIUM**, or **LOW**) by impact: what would chang
 - The margin of safety would change sign (price vs. base intrinsic value) or, in the MOS audit, cross the discount `margin_of_safety.md` requires.
 - A fact or input that a score or the valuation rests on is false, invented, missing, or unsourced.
 - A structural valuation error, whatever its size: double counting; mixing per-share and total figures; terminal growth at or above the discount rate; discounting anything other than owner earnings as `valuation.md` defines them; a discount rate outside 6%-9%; an ROE not computed as the references define it, where a score uses it.
+- An ASSUMPTION or JUDGMENT presented as a FACT, where a score or the valuation rests on it.
 
 **MEDIUM**: correcting it would weaken a supporting argument but not change a conclusion:
 - An unsupported or weakly sourced claim (including an idea attributed to Buffett without evidence) used in the reasoning but not decisive for a score.
 - A figure that feeds a calculation or score and differs, beyond rounding, within a file or between files.
 - A false statement of fact, even one no conclusion relies on.
+- An ASSUMPTION or JUDGMENT presented as a FACT where neither a score nor the valuation rests on it.
 
 **LOW**: none of the above applies, for example:
 - Effect on the low, base or high intrinsic value under 5%, and no score change.
-- Wording, presentation, list structure, citation format, or an imprecise label.
+- Wording, presentation, list structure, citation format, or an imprecise label that does not mislead, including a FACT/CALCULATION/ASSUMPTION/JUDGMENT label.
 - A rounding difference, or a stale figure that no calculation or score uses.
 
 You audit in two kinds of pass; the workflow tells you which one you are in.
@@ -69,6 +73,8 @@ Audit the moat, management, valuation and business analyses. The margin of safet
 Save your review to:
 `research/<KEY>/review.md`
 
+The owner of an issue in the moat, management or valuation analysis is that analysis's agent: `moat`, `management` or `valuation`. The owner is `report` for every issue in the business analysis (`research/<KEY>/business.md`), and for any issue only the final report can fix, such as presentation.
+
 Record every issue that is open after your review, at every severity. You audit and classify; the workflow decides what gets corrected:
 
 - HIGH issues in the analyses (moat, management, valuation) are sent back for correction first, up to the workflow's HIGH cap of correction rounds. Every open MEDIUM issue in the analyses is sent back in the same round, so all affected agents correct their files in parallel.
@@ -76,7 +82,7 @@ Record every issue that is open after your review, at every severity. You audit 
 - LOW issues are recorded for the record and never corrected.
 - An issue still open after being sent back for correction twice is not sent back again.
 - An issue still open when its cap is reached or that is no longer sent back (including every MEDIUM issue when HIGH issues remain open) goes to the final report flagged as unresolved.
-- Issues in the business analysis (`research/<KEY>/business.md`) are not sent back: they go to the report agent, which builds the report's Company Overview, Business Model and Financial Quality sections from it.
+- Issues owned by `report` are not sent back: they go to the report agent, which also builds the report's Company Overview, Business Model and Financial Quality sections from the business analysis.
 
 On a re-review, state for each previously reported issue whether it is now fixed, and record only the issues still open, keeping each one's severity unless the changes alter its impact.
 
@@ -86,6 +92,8 @@ Once the correction loop has ended, the MOS agent writes `research/<KEY>/mos.md`
 
 Save the audit to:
 `research/<KEY>/mos_review.md`
+
+The owner of every issue is `mos`.
 
 The MOS agent is never re-run to correct its analysis: HIGH and MEDIUM issues you find go to the report agent, which fixes them in the final report. LOW issues are recorded for the record only.
 

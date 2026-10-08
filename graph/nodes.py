@@ -367,7 +367,7 @@ class Workflow:
               f"issues), {summary['medium_correction_iterations']} MEDIUM-only")
         print(f"  Unresolved HIGH issues: {len(summary['unresolved_high_issues'])}")
         print(f"  Unresolved MEDIUM issues: {len(summary['unresolved_medium_issues'])}")
-        print(f"  MOS audit issues fixed in the report: {len(summary['mos_audit_issues_fixed_in_report'])}")
+        print(f"  MOS audit issues passed to the report agent: {len(summary['mos_audit_issues_passed_to_report'])}")
         print(f"  Wall time: {(summary['wall_seconds'] or 0) / 60:.1f} min")
         print(f"  Report:  {summary['final_report']}")
         print(f"  Summary: {paths.rel(paths.reports_dir / 'run_summary.md')}")
@@ -375,6 +375,6 @@ class Workflow:
                f"{summary['high_correction_iterations']} HIGH + {summary['medium_correction_iterations']} MEDIUM-only "
                f"correction round(s), {len(summary['unresolved_high_issues'])} unresolved HIGH, "
                f"{len(summary['unresolved_medium_issues'])} unresolved MEDIUM issue(s), "
-               f"{len(summary['mos_audit_issues_fixed_in_report'])} MOS audit issue(s) fixed in the report. "
+               f"{len(summary['mos_audit_issues_passed_to_report'])} MOS audit issue(s) passed to the report agent. "
                f"Report: {summary['final_report']}")
         return {"history": ["workflow complete"]}

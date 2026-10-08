@@ -176,8 +176,6 @@ def system_prompt(root: Path, paths: Paths, agent: str, company: str, iteration:
             f"- HIGH-severity correction rounds already performed: {high_iteration} of {MAX_CORRECTIONS}.",
             f"- MEDIUM-only correction rounds already performed: {medium_iteration} of {MAX_MEDIUM_CORRECTIONS}.",
             "- Give every finding a unique id (R1, R2, ...) and write that id next to the finding in review.md.",
-            "- Set `owner` to the single agent whose file must change: moat, management, valuation, "
-            "or `report` if only the final report can fix it (e.g. presentation, or anything in business.md).",
             "- Also audit compliance with the project data rules above.",
             "- The sidecar `findings` list holds ONLY issues that are open after this review, at every severity. "
             "An issue you verified as fixed is reported as fixed in review.md and left out of the sidecar.",
@@ -204,8 +202,7 @@ def system_prompt(root: Path, paths: Paths, agent: str, company: str, iteration:
             "`margin_of_safety.md` prescribes (every condition considered, the largest applicable discount applied, "
             "ROE computed as defined there); that the moat, management and valuation conclusions, and the upstream "
             "issues left open, are reflected correctly; the score; and compliance with the project data rules.",
-            "- Give every finding a unique id (M1, M2, ...) and write that id next to the finding in the audit file. "
-            "Set `owner` to `mos` for every finding.",
+            "- Give every finding a unique id (M1, M2, ...) and write that id next to the finding in the audit file.",
             "- The sidecar `findings` list holds every issue you found, at every severity.",
             f"- The LAST line of `{paths.rel(paths.output('mos_review'))}` must be exactly "
             "`Summary: H HIGH, M MEDIUM, L LOW` with real numbers: H, M and L equal the number of sidecar findings "

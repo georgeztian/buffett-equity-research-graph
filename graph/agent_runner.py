@@ -13,7 +13,8 @@ from typing import AsyncContextManager, AsyncIterator, Protocol
 
 from .config import AGENT_MAX_BUFFER_BYTES, AGENT_TIMEOUT_SECONDS, ENV_FILE, ensure_inside
 
-READ_TOOLS = ["Read", "Glob", "Grep", "WebSearch", "WebFetch"]
+FILE_READ_TOOLS = ["Read", "Glob", "Grep"]
+READ_TOOLS = FILE_READ_TOOLS + ["WebSearch", "WebFetch"]
 WRITE_TOOLS = ["Write", "Edit"]
 
 
@@ -26,7 +27,10 @@ class AgentTask:
     allowed_writes: tuple[Path, ...]   # the only files this agent may write
 
 
-USAGE_LIMIT = re.compile(r"(hit|reached) your .{0,40}limit|usage limit|session limit|weekly limit", re.IGNORECASE)
+# Wordings the Claude Code CLI uses: "You've hit your session limit", "You've reached your <model> limit",
+# "Usage limit reached", "You've hit your monthly spend limit", "You've hit your team's shared budget", ...
+USAGE_LIMIT = re.compile(r"(hit|reached) your .{0,40}(limit|budget)"
+                         r"|(usage|session|weekly|monthly|spend|budget|credit) limit", re.IGNORECASE)
 
 
 TOKEN_KEYS = ("input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
@@ -158,10 +162,15 @@ class SdkRunner:
 
         allowed = {ensure_inside(task.cwd, p).resolve() for p in task.allowed_writes}
 
+        # Claude Code calls this only where it would otherwise prompt. File reads inside the working directory are
+        # allowed without asking, so this callback never sees them: the user's .env is protected by the deny rule
+        # in `disallowed_tools` below, not here. What does reach it: web tools, writes, and reads outside the project.
         async def guard(tool: str, tool_input: dict, _ctx):
-            target = tool_input.get("file_path") or tool_input.get("path") or ""
-            if tool in ("Read", "Grep") and target and (task.cwd / target).resolve() == ENV_FILE.resolve():
-                return PermissionResultDeny(message="the user's private settings file is not readable")
+            if tool in FILE_READ_TOOLS:
+                target = tool_input.get("file_path") or tool_input.get("path")
+                if target and not (task.cwd / target).resolve().is_relative_to(task.cwd.resolve()):
+                    return PermissionResultDeny(message="files outside the project folder are not readable")
+                return PermissionResultAllow()
             if tool in READ_TOOLS:
                 return PermissionResultAllow()
             if tool in WRITE_TOOLS:
@@ -176,6 +185,8 @@ class SdkRunner:
             system_prompt=task.system_prompt,
             cwd=str(task.cwd),
             tools=READ_TOOLS + WRITE_TOOLS,
+            # The user's private settings (their SEC contact). A Read deny rule also hides the file from Grep and Glob.
+            disallowed_tools=[f"Read(./{ENV_FILE.name})"] if task.cwd.resolve() == ENV_FILE.parent.resolve() else [],
             can_use_tool=guard,   # requires streaming mode, which the client always uses
             setting_sources=[],   # do not inherit user/project settings, hooks or skills
             cli_path=find_claude_cli(),

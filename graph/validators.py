@@ -11,9 +11,9 @@ from datetime import date
 
 from pydantic import ValidationError
 
-from . import contracts, manifest
-from .config import (BUSINESS_HEADINGS, DEPENDS, IV_TOLERANCE, MOS_PCT_TOLERANCE, PRICE_MAX_AGE_DAYS, REPORT_HEADINGS,
-                     SCORED_AGENTS, SOURCE_TAGS, Paths)
+from . import contracts
+from .config import (BUSINESS_HEADINGS, IV_TOLERANCE, MOS_PCT_TOLERANCE, PRICE_MAX_AGE_DAYS, REPORT_HEADINGS,
+                     REPORT_PENDING, SCORED_AGENTS, SOURCE_TAGS, Paths)
 
 MIN_CHARS = {"moat": 2500, "management": 2500, "valuation": 3000, "business": 3000, "mos": 1500, "review": 1500,
              "mos_review": 1000, "report": 6000}
@@ -25,7 +25,7 @@ FRESHNESS_SLACK = 2.0  # seconds; filesystem mtime granularity
 
 
 def _has_heading(text: str, name: str) -> bool:
-    pattern = rf"^#{{1,4}}\s*(?:\d+[.)]\s*)?{re.escape(name)}\b"
+    pattern = rf"^#{{1,4}}\s*[*_]*(?:\d+[.)]\s*)?[*_]*{re.escape(name)}\b"   # "## 3. Name", "## **Name**"
     return re.search(pattern, text, re.IGNORECASE | re.MULTILINE) is not None
 
 
@@ -217,6 +217,9 @@ def _check_report(text: str, rep: contracts.ReportSidecar, scores: dict[str, int
     when an issue owned by the report requires it; see _check_changeable. The report states the financial quality
     score it uses, and a changed MOS score, as N/10."""
     errs = [f"missing report section: '{h}'" for h in REPORT_HEADINGS if not _has_heading(text, h)]
+    if REPORT_PENDING in text:
+        errs.append(f"the report still contains the draft placeholder {REPORT_PENDING}: write every section that "
+                    "has it, and remove every placeholder")
     for agent, s in scores.items():
         if agent == "mos":
             got = rep.scores_reported.get("mos")
@@ -291,9 +294,3 @@ def saved_before_error(agent: str, paths: Paths, started: float, **kw) -> bool:
     side, out = paths.sidecar(agent), paths.output(agent)
     return (side.exists() and out.exists() and side.stat().st_mtime >= out.stat().st_mtime
             and not validate(agent, paths, started, **kw))
-
-
-def check_fresh_inputs(paths: Paths, agent: str) -> list[str]:
-    """Before review, mos, mos_review and report: no upstream file may be stale relative to the inputs it was built
-    from."""
-    return [f"stale output: {a}" for a in manifest.stale_agents(paths, DEPENDS[agent])]

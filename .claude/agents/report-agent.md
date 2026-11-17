@@ -30,7 +30,7 @@ You are also responsible for fixing the issues the MOS audit (`research/<KEY>/mo
 
 ## When to produce the report
 
-Only produce the final report once the review stage is over and the margin of safety analysis has been written and audited. The review stage is over when either the research passed review, or the correction loop ended with issues still open (a severity's cap of correction rounds was reached, or an issue was still open after being sent back for correction twice; when HIGH issues remain open, no MEDIUM-only correction rounds are run either). In the second case, clearly flag every unresolved issue in the report, labeled with its severity (HIGH or MEDIUM). LOW-severity issues are never required to be corrected and are not treated as unresolved. Issues of the MOS audit that you fix in the report are resolved, not unresolved.
+Only produce the final report once the review stage is over and the margin of safety analysis has been written and audited. Once the review stage is over, the workflow may first ask you to draft the sections that do not depend on the margin of safety analysis, while that analysis and its audit are being written; the report is final only when you complete it afterwards. The review stage is over when either the research passed review, or the correction loop ended with issues still open (the workflow lists them for you). In the second case, clearly flag every unresolved issue in the report, labeled with its severity (HIGH or MEDIUM). LOW-severity issues are never required to be corrected and are not treated as unresolved. Issues of the MOS audit that you fix in the report are resolved, not unresolved.
 
 ## Audience and style
 

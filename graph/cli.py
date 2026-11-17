@@ -159,6 +159,21 @@ def check_sec_contact() -> None:
     print(f"Note: {problem}: this run goes ahead without the SEC data pack.\n{SEC_SETUP_HELP}", file=sys.stderr)
 
 
+def _safe_output() -> None:
+    """Progress and error lines quote text written by agents and by Claude Code, so they can hold any character.
+    On Windows a redirected stdout (the detached-run log) is cp1252 and a console may be too: printing a character
+    they lack (e.g. an arrow) would raise UnicodeEncodeError inside a node and fail the run. Log files are written
+    as UTF-8; a console keeps its encoding and shows a `?` for what it cannot display."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            if stream.isatty():
+                stream.reconfigure(errors="replace")
+            else:
+                stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError, OSError):   # replaced or closed stream: leave it as it is
+            pass
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m graph", description="Deterministic Buffett analysis graph")
     ap.add_argument("--company", help='"Company Name", "TICKER" or "Company Name (TICKER)"')
@@ -171,6 +186,7 @@ def main(argv: list[str] | None = None) -> int:
                     help="save your name and contact email for SEC EDGAR requests to the project .env, and exit "
                          f"(or '{SEC_DECLINED}' to run without the SEC data pack and not be asked again)")
     a = ap.parse_args(argv)
+    _safe_output()
 
     if a.set_sec_contact is not None:
         return 0 if set_sec_contact(a.set_sec_contact) else 2

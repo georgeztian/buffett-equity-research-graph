@@ -2,6 +2,8 @@
 
 Pulls the company's annual XBRL facts from SEC EDGAR once, so the Stage 1 agents, the MOS agent, the reviewer
 and the report agent all work from the same primary-source numbers instead of each fetching (and re-deriving) them.
+It also saves the text of the latest 10-K, 10-Q, proxy statement and earnings release, which every one of them
+would otherwise fetch from the web separately.
 No model is involved. Values are copied exactly as filed; every row names its XBRL tag (different tags are never
 merged into one row); the few reference calculations show their formulas and inputs. If anything fails, the
 pack says it is unavailable and the agents research everything as before, so this stage can never fail a run.
@@ -12,12 +14,14 @@ import gzip
 import http.client
 import json
 import re
+import textwrap
 import time
 import urllib.error
 import urllib.request
 from datetime import date, datetime
+from html.parser import HTMLParser
 
-from .config import DATA_PACK_YEARS, SEC_TIMEOUT_SECONDS, Paths, sec_contact
+from .config import DATA_PACK_YEARS, FILING_MAX_BYTES, SEC_TIMEOUT_SECONDS, Paths, sec_contact
 
 TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
 FACTS_URL = "https://data.sec.gov/api/xbrl/companyfacts/CIK{cik:010d}.json"
@@ -78,6 +82,10 @@ ITEMS: dict[str, list[tuple[str, str, str, tuple[str, ...]]]] = {
 
 # ---------------------------------------------------------------------------------------------------- fetching
 def _get_json(url: str, ua: str) -> dict:
+    return json.loads(_get(url, ua))
+
+
+def _get(url: str, ua: str) -> bytes:
     req = urllib.request.Request(url, headers={"User-Agent": ua, "Accept-Encoding": "gzip"})
     for attempt in range(3):
         try:
@@ -85,7 +93,7 @@ def _get_json(url: str, ua: str) -> dict:
                 body = r.read()
                 if r.headers.get("Content-Encoding") == "gzip":
                     body = gzip.decompress(body)
-                return json.loads(body)
+                return body
         except urllib.error.HTTPError as e:
             if e.code not in (429, 500, 502, 503, 504) or attempt == 2:
                 raise
@@ -195,19 +203,191 @@ def _table(header: list[str], rows: list[list[str]]) -> str:
     return "\n".join(lines)
 
 
-def _recent_filings(cik: int, subs: dict) -> list[str]:
+def _filing_rows(cik: int, subs: dict) -> list[dict]:
+    """The company's recent filings, newest first, as the submissions API lists them."""
     r = subs.get("filings", {}).get("recent", {})
+    items = r.get("items") or []
+    rows = []
+    for i, form in enumerate(r.get("form", [])):
+        accn, doc = r["accessionNumber"][i], r["primaryDocument"][i]
+        folder = f"https://www.sec.gov/Archives/edgar/data/{cik}/{accn.replace('-', '')}"
+        rows.append({"form": form, "filed": r["filingDate"][i], "period": r["reportDate"][i] or "n/a", "accn": accn,
+                     "folder": folder, "url": f"{folder}/{doc}", "items": items[i] if i < len(items) else ""})
+    return rows
+
+
+def _recent_filings(rows: list[dict]) -> list[str]:
     want = {"10-K": 1, "20-F": 1, "10-Q": 2, "DEF 14A": 1, "8-K": 5}
     got: dict[str, int] = {}
     lines = []
-    for i, form in enumerate(r.get("form", [])):
+    for f in rows:
+        form = f["form"]
         if form in want and got.get(form, 0) < want[form]:
             got[form] = got.get(form, 0) + 1
-            accn, doc = r["accessionNumber"][i], r["primaryDocument"][i]
-            url = f"https://www.sec.gov/Archives/edgar/data/{cik}/{accn.replace('-', '')}/{doc}"
-            period = r["reportDate"][i] or "n/a"
-            lines.append(f"- {form} filed {r['filingDate'][i]} (period {period}), accession {accn}: {url}")
+            lines.append(f"- {form} filed {f['filed']} (period {f['period']}), accession {f['accn']}: {f['url']}")
     return lines
+
+
+# ---------------------------------------------------------------------------------------------------- filing texts
+# The latest annual report, quarterly report, proxy statement and earnings release are what every analyst and the
+# reviewer would otherwise each fetch from the web. Stage 0 downloads each once and saves its text, so the agents
+# search and read a local file instead.
+_SKIP_TAGS = {"script", "style", "head", "title", "ix:header"}   # ix:header: the hidden inline-XBRL definitions
+_BLOCK_TAGS = {"p", "div", "br", "tr", "table", "li", "ul", "ol", "hr", "h1", "h2", "h3", "h4", "h5", "h6",
+               "section", "article", "center", "blockquote", "pre", "dt", "dd"}
+_CELL = "\x00"      # marks the start of a table cell while the text is collected (not white space to str.split)
+_LINE_WIDTH = 300  # Read and Grep work by line: long paragraphs are wrapped
+_ITEM_HEADING = re.compile(r"Item\s+\d{1,2}[A-C]?\b[\s.:)\-–—|]*(.{0,100})$", re.IGNORECASE)
+
+
+class _FilingText(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.parts: list[str] = []
+        self.skip = 0
+
+    def handle_starttag(self, tag, attrs):
+        if tag in _SKIP_TAGS:
+            self.skip += 1
+        elif not self.skip:
+            if tag in ("td", "th"):
+                self.parts.append(_CELL)
+            elif tag in _BLOCK_TAGS:
+                self.parts.append("\n")
+
+    def handle_endtag(self, tag):
+        if tag in _SKIP_TAGS:
+            self.skip = max(0, self.skip - 1)
+        elif not self.skip and tag in _BLOCK_TAGS:
+            self.parts.append("\n")
+
+    def handle_data(self, data):
+        if not self.skip:   # a line break in the HTML source is only white space; lines come from block tags
+            self.parts.append(data.replace("\r", " ").replace("\n", " "))
+
+
+def _row(line: str) -> str:
+    """One table row: empty layout cells dropped, a currency sign joined to its number and a closing bracket or
+    percent sign to the number before it (filings put them in cells of their own)."""
+    cells: list[str] = []
+    for c in (c.strip() for c in line.split(_CELL)):
+        if not c:
+            continue
+        if cells and (c in (")", "%", ")%") or cells[-1] in ("$", "(", "$(")):
+            cells[-1] += c
+        else:
+            cells.append(c)
+    return " | ".join(cells)
+
+
+def html_to_lines(html: str) -> list[str]:
+    """The readable text of a filing document, one paragraph or table row per line."""
+    p = _FilingText()
+    p.feed(html)
+    p.close()
+    out: list[str] = []
+    for raw in "".join(p.parts).splitlines():
+        is_row = _CELL in raw
+        line = _row(" ".join(raw.replace("\xa0", " ").split()))
+        if not line:
+            continue
+        if is_row or len(line) <= _LINE_WIDTH:
+            out.append(line)
+        else:
+            out += textwrap.wrap(line, _LINE_WIDTH, break_long_words=False, break_on_hyphens=False)
+    return out
+
+
+def filing_sections(lines: list[str], first_line: int = 1) -> list[tuple[int, str]]:
+    """(line number, heading) of the "Item N." sections of a 10-K or 10-Q. A table of contents lists the same
+    headings on consecutive lines; those are left out, so an entry points at the section itself."""
+    hits = []
+    for i, line in enumerate(lines):
+        m = _ITEM_HEADING.match(line)
+        if m:
+            title = line if m.group(1).strip() or i + 1 >= len(lines) else f"{line} {lines[i + 1][:80]}"
+            hits.append((i, " ".join(title.replace("|", " ").split())))
+    keep = [h for h, nxt in zip(hits, hits[1:] + [None]) if nxt is None or nxt[0] - h[0] >= 4]
+    return [(i + first_line, title) for i, title in keep][:60]
+
+
+def _decode(body: bytes) -> str:
+    try:
+        return body.decode("utf-8")
+    except UnicodeDecodeError:
+        return body.decode("cp1252", errors="replace")
+
+
+def _earnings_exhibit(f: dict, ua: str) -> str | None:
+    """URL of the press release (exhibit 99) attached to an 8-K, from the filing's index; None if there is none."""
+    names = [i.get("name", "") for i in _get_json(f"{f['folder']}/index.json", ua).get("directory", {}).get("item", [])]
+    hits = sorted(n for n in names if re.search(r"ex[-_.]?99", n, re.IGNORECASE) and n.lower().endswith((".htm", ".html")))
+    return f"{f['folder']}/{hits[0]}" if hits else None
+
+
+def _filing_targets(rows: list[dict]) -> list[tuple[str, dict]]:
+    """(label, filing) of the documents to save: the latest 10-K, the latest 10-Q if it is newer than that 10-K, the
+    latest proxy statement, and the latest 8-K announcing results (Item 2.02), for its press release."""
+    def first(pred):
+        return next((f for f in rows if pred(f)), None)
+    k = first(lambda f: f["form"] == "10-K")
+    q = first(lambda f: f["form"] == "10-Q")
+    out = [("10-K", k)] if k else []
+    if q and (not k or q["filed"] > k["filed"]):
+        out.append(("10-Q", q))
+    out += [(label, f) for label, f in (("DEF 14A (proxy statement)", first(lambda f: f["form"] == "DEF 14A")),
+                                        ("8-K earnings release (exhibit 99)",
+                                         first(lambda f: f["form"] == "8-K" and "2.02" in f["items"]))) if f]
+    return out
+
+
+def save_filings(paths: Paths, rows: list[dict], ua: str, entity: str) -> list[dict]:
+    """Save the text of the target filings under _data/filings/ (reusing a file a previous run saved: a filing never
+    changes). Returns what is available: label, filing, project-relative path, line count, sections. A document
+    that cannot be fetched or read is left out, and the agents fetch it themselves as before."""
+    saved = []
+    for label, f in _filing_targets(rows):
+        try:
+            name = re.sub(r"[^A-Za-z0-9]+", "-", label.split(" (")[0]).strip("-")
+            dest = paths.filings_dir / f"{name}_{f['period'] if f['period'] != 'n/a' else f['filed']}_{f['accn']}.txt"
+            if not dest.exists() or dest.stat().st_size == 0:
+                url = _earnings_exhibit(f, ua) if label.startswith("8-K") else f["url"]
+                if not url or not url.lower().endswith((".htm", ".html")):
+                    continue
+                body = _get(url, ua)
+                if len(body) > FILING_MAX_BYTES:
+                    continue
+                lines = html_to_lines(_decode(body))
+                if not lines:
+                    continue
+                head = [f"# {label} of {entity}: period {f['period']}, filed {f['filed']}, accession {f['accn']}",
+                        f"# Source: {url}",
+                        "# Text extracted by the workflow from the filing document: layout removed, table cells "
+                        "separated by \" | \". The document at the source URL is the authoritative version.", ""]
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                dest.write_text("\n".join(head + lines) + "\n", encoding="utf-8")
+            text = dest.read_text(encoding="utf-8").splitlines()
+            saved.append({"label": label, "form": f["form"], "period": f["period"], "filed": f["filed"],
+                          "accn": f["accn"], "path": paths.rel(dest), "lines": len(text),
+                          "sections": filing_sections(text) if f["form"] in ("10-K", "10-Q") else []})
+        except Exception:   # one missing document must not cost the others, or the data pack
+            continue
+    return saved
+
+
+def _filings_md(saved: list[dict]) -> list[str]:
+    if not saved:
+        return ["None could be saved for this run: fetch the filings linked above as needed."]
+    out = ["The workflow saved the text of these filings once for every agent in this run. Use them instead of "
+           "fetching the same documents from the web. They are long: search a file with Grep (give the file's path "
+           "as the Grep `path`), then Read only the line ranges you need (`offset` and `limit`); do not read a whole "
+           "filing. Cite what you take from them as the filing itself (form, filing date, accession number)."]
+    for s in saved:
+        out += ["", f"### {s['label']}: period {s['period']}, filed {s['filed']}, accession {s['accn']}", "",
+                f"`{s['path']}` ({s['lines']:,} lines)"]
+        if s["sections"]:
+            out += ["", "Sections, by the line each starts on:"] + [f"- line {n}: {t}" for n, t in s["sections"]]
+    return out
 
 
 # ---------------------------------------------------------------------------------------------------- calculations
@@ -365,6 +545,8 @@ def _build(paths: Paths, company: str) -> str:
 
     calc_rows, calc_notes, calc = calculations(series, ends)
     split_warnings = possible_splits(series, ends)
+    filing_rows = _filing_rows(cik, subs)
+    saved = save_filings(paths, filing_rows, ua, facts.get("entityName") or company)
 
     accns: dict[str, set[str]] = {}
     for vals in series.values():
@@ -406,12 +588,17 @@ def _build(paths: Paths, company: str) -> str:
         *(f"- WARNING: {w}" for w in split_warnings),
         "- Debt tags differ in scope (for example, `LongTermDebt` can include current maturities while "
         "`LongTermDebtNoncurrent` excludes them): compose total debt from the balance sheet, not by adding rows blindly.",
-        "- Not covered: share price and market multiples (P/E, P/B), segment data, non-GAAP measures, quarterly/TTM "
-        "figures, and anything not tagged in XBRL. Use the filings linked below and other sources as usual.",
+        "- Not covered by the tables: share price and market multiples (P/E, P/B), segment data, non-GAAP measures, "
+        "quarterly/TTM figures, and anything not tagged in XBRL. Take them from the filing texts saved for this run "
+        "(listed below), and from the filings linked below and other sources as usual.",
         "",
         "## Recent filings (primary documents)",
         "",
-        *(_recent_filings(cik, subs) or ["- none found"]),
+        *(_recent_filings(filing_rows) or ["- none found"]),
+        "",
+        "## Filing texts saved for this run",
+        "",
+        *_filings_md(saved),
         "",
         "## Annual financial data (FACT, from 10-K XBRL)",
         "",
@@ -446,6 +633,7 @@ def _build(paths: Paths, company: str) -> str:
     (paths.data_dir / "financials.json").write_text(json.dumps({
         "generated": datetime.now().isoformat(timespec="seconds"), "cik": cik, "ticker": ticker,
         "entity": facts.get("entityName"), "fiscal_year_ends": ends, "facts": series,
-        "calculations": calc,
+        "calculations": calc, "filing_texts": saved,
     }, indent=1), encoding="utf-8")
-    return f"SEC XBRL data for {ticker} (CIK {cik}), {len(ends)} fiscal years {ends[0]}..{ends[-1]}"
+    return (f"SEC XBRL data for {ticker} (CIK {cik}), {len(ends)} fiscal years {ends[0]}..{ends[-1]}; "
+            f"{len(saved)} filing text(s) saved")

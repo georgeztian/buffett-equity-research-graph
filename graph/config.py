@@ -29,6 +29,7 @@ AGENT_MAX_BUFFER_BYTES = 100 * 1024 * 1024
 ENV_FILE = ROOT / ".env"
 SEC_TIMEOUT_SECONDS = 30
 DATA_PACK_YEARS = 15         # fiscal years of XBRL history in the data pack
+FILING_MAX_BYTES = 60 * 1024 * 1024   # a filing document larger than this is not saved as text (agents fetch it)
 
 RESEARCH_AGENTS = ("moat", "management", "valuation")   # Stage 1 analysts; the MOS agent's inputs
 STAGE1_AGENTS = RESEARCH_AGENTS + ("business",)         # Stage 1 (parallel)
@@ -84,6 +85,16 @@ REPORT_HEADINGS = (
     "Economic Moat", "Management Quality", "Valuation", "Margin of Safety",
     "Key Risks", "Final Investment Assessment",
 )
+
+# The report is written in two phases of one agent session, to save wall time. While the MOS agent and the MOS audit
+# run (Stages 4-5), the report agent drafts the sections that do not depend on them, from the analyses that are
+# already final; once the audit is done, the same session completes the report (Stage 6). Nothing is accepted as
+# the report before that: the draft is not validated, recorded or reported, and a run that resumes without the
+# live session writes the report in one pass.
+REPORT_DRAFT_DEPENDS = RESEARCH_AGENTS + ("business", "review")   # what the draft phase reads; all final by then
+REPORT_PENDING_HEADINGS = ("Executive Summary", "Margin of Safety", "Key Risks", "Final Investment Assessment")
+REPORT_DRAFT_HEADINGS = tuple(h for h in REPORT_HEADINGS if h not in REPORT_PENDING_HEADINGS)
+REPORT_PENDING = "[[PENDING]]"   # body of a section the draft leaves for the second phase; never in a final report
 
 
 def ensure_inside(root: Path, path: Path) -> Path:
@@ -251,6 +262,12 @@ class Paths:
     @property
     def data_pack(self) -> Path:
         return self.data_dir / "financials.md"
+
+    @property
+    def filings_dir(self) -> Path:
+        """Text of the latest SEC filings, saved by Stage 0. A file is named by its accession number and never
+        changes, so later runs reuse it instead of downloading it again (it is not archived by a fresh run)."""
+        return self.data_dir / "filings"
 
     @property
     def reports_dir(self) -> Path:

@@ -9,9 +9,10 @@ from datetime import datetime
 from pathlib import Path
 
 from . import contracts, datapack, manifest, prompts, routing, validators
-from .agent_runner import AgentRunner, AgentTask, Usage
+from .agent_runner import AgentRunner, AgentTask, RunResult, Usage
 from .config import (AGENT_FILE, ALL_AGENTS, CORRECTABLE, DEPENDS, MAX_CORRECTIONS, MAX_FINDING_ATTEMPTS,
-                     MAX_MEDIUM_CORRECTIONS, MAX_VALIDATION_RETRIES, SCORED_AGENTS, STAGE1_AGENTS, Paths)
+                     MAX_MEDIUM_CORRECTIONS, MAX_VALIDATION_RETRIES, REPORT_DRAFT_DEPENDS, SCORED_AGENTS,
+                     STAGE1_AGENTS, Paths)
 from .notify import notify
 from .summary import write_summary
 
@@ -42,6 +43,58 @@ class UsageLimitReached(NodeFailure):
     """Claude usage limit hit. Stop at once (retrying cannot help); resume with --resume after the reset."""
 
 
+class HeldSession:
+    """An agent session kept open across graph nodes: the report agent's, which drafts during Stages 4-5 and
+    completes the report in Stage 6. One task owns the session for its whole life, because the SDK client must be
+    opened, used and closed in the same task; prompts reach it through a queue. `first` is the pending result of the
+    prompt it was started with."""
+
+    def __init__(self, runner: AgentRunner, task: AgentTask):
+        self.started = time.time()
+        self.first_seconds: float | None = None   # how long the first prompt took, once it is done
+        self._queue: asyncio.Queue = asyncio.Queue()
+        self._waiting: list[asyncio.Future] = []
+        self._owner = asyncio.create_task(self._run(runner, task))
+        self.first = self._post(task.prompt)
+        self.first.add_done_callback(lambda _: setattr(self, "first_seconds", time.time() - self.started))
+
+    async def _run(self, runner: AgentRunner, task: AgentTask) -> None:
+        try:
+            async with runner.session(task) as session:
+                while (item := await self._queue.get()) is not None:
+                    prompt, fut = item
+                    try:
+                        res = await session.send(prompt)
+                    except Exception as e:
+                        res = RunResult(ok=False, error=f"{type(e).__name__}: {e}")
+                    if not fut.done():
+                        fut.set_result(res)
+        finally:   # closed, aborted or broken: nobody may be left waiting for an answer
+            for fut in self._waiting:
+                if not fut.done():
+                    fut.set_result(RunResult(ok=False, error="the agent session was closed"))
+
+    def _post(self, prompt: str) -> asyncio.Future:
+        fut = asyncio.get_running_loop().create_future()
+        if self._owner.done():
+            fut.set_result(RunResult(ok=False, error="the agent session was closed"))
+        else:
+            self._waiting.append(fut)
+            self._queue.put_nowait((prompt, fut))
+        return fut
+
+    async def send(self, prompt: str) -> RunResult:
+        return await self._post(prompt)
+
+    async def close(self, abort: bool = False) -> None:
+        """End the session: after the prompt in progress, or at once with `abort`. Safe to call again."""
+        if abort:
+            self._owner.cancel()
+        else:
+            self._queue.put_nowait(None)
+        await asyncio.gather(self._owner, return_exceptions=True)
+
+
 def _unresolved(state: dict) -> list[contracts.Finding]:
     """The upstream issues the correction loop left open, as recorded by the flag nodes (the only way the loop ends
     with a correctable HIGH or MEDIUM finding open). Passed to the MOS agent and to the report."""
@@ -51,9 +104,9 @@ def _unresolved(state: dict) -> list[contracts.Finding]:
 
 def _require_fresh_inputs(paths: Paths, agent: str) -> None:
     """Before review, mos, mos_review and report: refuse to run on an upstream file built from outdated inputs."""
-    stale = validators.check_fresh_inputs(paths, agent)
+    stale = manifest.stale_agents(paths, DEPENDS[agent])
     if stale:
-        raise NodeFailure(f"{agent} blocked, stale inputs: {stale}", agent)
+        raise NodeFailure(f"{agent} blocked, stale upstream outputs: {stale}", agent)
 
 
 def _merge(*updates: dict) -> dict:
@@ -69,12 +122,48 @@ class Workflow:
     def __init__(self, runner: AgentRunner, root: Path):
         self.runner = runner
         self.root = root
+        self._draft: HeldSession | None = None   # the report agent's session while it drafts (Stages 4-5)
 
     def paths(self, state: dict) -> Paths:
         return Paths(self.root, state["key"])
 
+    # ------------------------------------------------------------------ report draft (parallel with Stages 4-5)
+    @staticmethod
+    def _report_notes(state: dict) -> list[contracts.Finding]:
+        """The HIGH and MEDIUM findings of the main review that the report agent owns."""
+        return [f for sev in ("HIGH", "MEDIUM") for f in routing.report_owned(state.get("findings", []), sev)]
+
+    async def _start_report_draft(self, state: dict) -> None:
+        """Called when the MOS agent or its audit starts: open the report agent's session and have it draft the
+        sections that do not depend on them (see config.REPORT_DRAFT_DEPENDS), so that Stage 6 only has to complete
+        the report. Purely an optimization: if the draft cannot start or fails, Stage 6 writes the whole report."""
+        paths = self.paths(state)
+        it = state.get("iteration", 0)
+        if (self._draft is not None or manifest.completed_in_round(paths, "report", it)
+                or any(not paths.output(d).exists() for d in REPORT_DRAFT_DEPENDS)
+                or manifest.stale_agents(paths, REPORT_DRAFT_DEPENDS)):
+            return
+        sys_prompt = prompts.system_prompt(self.root, paths, "report", state["company"], it,
+                                           high_iteration=state.get("high_iteration", 0),
+                                           medium_iteration=state.get("medium_iteration", 0))
+        prompt = prompts.report_draft_prompt(paths, state["company"], scores=state.get("scores"),
+                                             unresolved=_unresolved(state), report_notes=self._report_notes(state))
+        _log("report: drafting the sections that do not depend on the margin of safety analysis, in parallel with "
+             "that analysis and its audit")
+        self._draft = HeldSession(self.runner, AgentTask("report", sys_prompt, prompt, self.root,
+                                                         (paths.output("report"), paths.sidecar("report"))))
+        await asyncio.sleep(0)   # let the session start before this node's own agent does
+
+    async def _abandon_report_draft(self) -> None:
+        """The run stops before the report stage (the MOS agent or its audit failed): the draft session cannot
+        outlive the process, so end it now instead of paying for work that would be lost."""
+        draft, self._draft = self._draft, None
+        if draft is not None:
+            await draft.close(abort=True)
+            _log("report: draft abandoned, as the run stops before the report stage")
+
     # ------------------------------------------------------------------ core executor
-    async def _execute(self, agent: str, state: dict, **ctx) -> dict:
+    async def _execute(self, agent: str, state: dict, *, draft: HeldSession | None = None, **ctx) -> dict:
         paths = self.paths(state)
         iteration = state.get("iteration", 0)               # total correction rounds (HIGH + MEDIUM); unique round id
         high_iteration = state.get("high_iteration", 0)     # HIGH-phase rounds so far; cap: MAX_CORRECTIONS
@@ -113,7 +202,24 @@ class Workflow:
                "mos_fixes": ctx.get("mos_fixes") or [], "report_notes": ctx.get("report_notes") or []}
         errors, attempts, started = [], 0, time.time()
         async with AsyncExitStack() as stack:
-            session = None
+            session, session_stack, finish = None, None, None
+            if draft is not None:
+                # The report agent has been drafting in its own session since Stage 4. If the draft was saved, the
+                # report is completed in that session; if it failed, the report is written from scratch as usual.
+                if not draft.first.done():
+                    _log(f"{agent}: waiting for its draft to be saved")
+                res = await draft.first
+                use.add(res)
+                use.t0 = time.time() - (draft.first_seconds or 0.0)   # count the drafting time, not the waiting
+                if res.ok:
+                    session, finish = draft, prompts.report_finish_prompt(paths, base_prompt)
+                    _log(f"{agent}: draft saved ({draft.first_seconds or 0:.0f}s); completing the report in the "
+                         "same session")
+                elif res.usage_limit:
+                    raise UsageLimitReached(f"{agent}: {res.error}", agent, use)
+                else:
+                    _log(f"{agent}: the draft failed ({res.error[:120]}); writing the report in a new session")
+                    await draft.close()
             for attempt in range(1, MAX_VALIDATION_RETRIES + 2):
                 attempts = attempt
                 if session is None:
@@ -125,23 +231,29 @@ class Workflow:
                         self.runner.session(AgentTask(agent, sys_prompt, prompt, self.root, allowed)))
                     started = time.time()
                     how = ""
+                elif finish is not None:
+                    prompt, finish, started, how = finish, None, time.time(), ""
                 else:
                     prompt = prompts.fix_prompt(errors)
                     how = " (same session)"
                 _log(f"{agent}: started{label}" + (f", attempt {attempt}{how}" if attempt > 1 else ""))
                 res = await session.send(prompt)
                 use.add(res)
-                if res.usage_limit:
-                    raise UsageLimitReached(f"{agent}: {res.error}", agent, use)
                 if res.ok:
                     errors = validators.validate(agent, paths, started, **vkw)
                 elif validators.saved_before_error(agent, paths, started, **vkw):
-                    # the turn failed only after the agent had saved complete outputs: keep them, don't redo the task
+                    # the turn failed (even on a usage limit) only after the agent had saved complete outputs: keep
+                    # them, don't redo the task. After a usage limit, the next agent to start pauses the run.
                     _log(f"{agent}: {res.error[:120]} - but its saved files are complete and pass validation; kept")
                     errors = []
+                elif res.usage_limit:
+                    raise UsageLimitReached(f"{agent}: {res.error}", agent, use)
                 else:
                     errors = [f"agent execution error: {res.error}"]
-                    await session_stack.aclose()   # a broken session is not reused
+                    if session is draft:           # a broken session is not reused
+                        await draft.close()
+                    else:
+                        await session_stack.aclose()
                     session = None
                 if not errors:
                     break
@@ -191,7 +303,8 @@ class Workflow:
 
         stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         old = [p for p in (*paths.research_dir.glob("*.md"), *paths.meta_dir.rglob("*"),
-                           *paths.data_dir.rglob("*")) if p.is_file()]
+                           *paths.data_dir.rglob("*"))
+               if p.is_file() and not p.is_relative_to(paths.filings_dir)]   # saved filing texts are reused
         old += [p for p in paths.reports_dir.glob("*") if p.is_file()]
         if old:  # a fresh run must never mistake earlier outputs for its own
             arch = paths.research_dir / "_archive" / stamp
@@ -329,14 +442,24 @@ class Workflow:
         has ended. It is never re-run: the one-time MOS audit's issues are fixed by the report agent. The upstream
         issues the loop left open are passed on, so the analysis can take them into account."""
         _require_fresh_inputs(self.paths(state), "mos")
-        return await self._execute("mos", state, upstream_open=_unresolved(state))
+        await self._start_report_draft(state)
+        try:
+            return await self._execute("mos", state, upstream_open=_unresolved(state))
+        except BaseException:
+            await self._abandon_report_draft()
+            raise
 
     async def mos_review(self, state: dict) -> dict:
         """Stage 5: the reviewer's one-time audit of the MOS analysis. Its findings never loop back: the HIGH and
         MEDIUM ones go to the report agent, which fixes them in the report."""
         paths = self.paths(state)
-        _require_fresh_inputs(paths, "mos_review")
-        upd = await self._execute("mos_review", state)
+        try:
+            _require_fresh_inputs(paths, "mos_review")
+            await self._start_report_draft(state)   # no-op unless this run resumed here, after the MOS agent
+            upd = await self._execute("mos_review", state)
+        except BaseException:
+            await self._abandon_report_draft()
+            raise
         rev = contracts.load_review(paths.sidecar("mos_review"))
         c = rev.counts
         upd["mos_findings"] = [f.model_dump() for f in rev.findings]
@@ -345,13 +468,23 @@ class Workflow:
         return upd
 
     async def report(self, state: dict) -> dict:
+        """Stage 6. The report agent normally has a draft of the sections that do not depend on the MOS analysis
+        (written in its own session during Stages 4-5) and completes the report in that session; without one (a
+        resumed run, or a failed draft) it writes the whole report here."""
         paths = self.paths(state)
-        _require_fresh_inputs(paths, "report")
-        notes = [f for sev in ("HIGH", "MEDIUM") for f in routing.report_owned(state.get("findings", []), sev)]
-        mos_fixes = [f for f in (contracts.Finding.model_validate(x) for x in state.get("mos_findings", []))
-                     if f.severity in ("HIGH", "MEDIUM")]
-        upd = await self._execute("report", state, unresolved=_unresolved(state), report_notes=notes,
-                                  mos_fixes=mos_fixes)
+        draft, self._draft = self._draft, None
+        try:
+            _require_fresh_inputs(paths, "report")
+            mos_fixes = [f for f in (contracts.Finding.model_validate(x) for x in state.get("mos_findings", []))
+                         if f.severity in ("HIGH", "MEDIUM")]
+            upd = await self._execute("report", state, draft=draft, unresolved=_unresolved(state),
+                                      report_notes=self._report_notes(state), mos_fixes=mos_fixes)
+        except BaseException:
+            if draft is not None:
+                await draft.close(abort=True)
+            raise
+        if draft is not None:
+            await draft.close()   # no-op if the session already ended
         rep = contracts.load_report(paths.sidecar("report"))
         upd["reported_scores"] = {**rep.scores_reported, "business": rep.financial_quality_score}
         upd["score_changes"] = {k: c.model_dump() for k, c in (("mos", rep.mos_score_change),
